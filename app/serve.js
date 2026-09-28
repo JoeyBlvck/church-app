@@ -30,6 +30,9 @@ async function pullDeviceUsers(res) {
   } catch (e) { sendJson(res, 502, { error: `Could not reach the clock-in device: ${e.message}. Check that this computer is on the same network as it, and that server/hikvision.config.json has the right address and login.` }); }
 }
 
+// PORT is set by hosting platforms (Railway, etc.) that assign the port dynamically; falls back to 5173 locally.
+const port = Number(process.env.PORT ?? 5173);
+
 http.createServer(async (req, res) => {
   const pathname = new URL(req.url, 'http://x').pathname;
   if (req.method === 'POST' && pathname === '/api/device/pull-users') return pullDeviceUsers(res);
@@ -41,4 +44,4 @@ http.createServer(async (req, res) => {
     // no-store: dev server, always serve the current file on disk (never a stale browser-cached copy).
     res.writeHead(200, { 'content-type': types[extname(file)] ?? 'application/octet-stream', 'cache-control': 'no-store' }).end(buf);
   } catch { res.writeHead(404).end('not found'); }
-}).listen(5173, () => console.log('app on http://localhost:5173'));
+}).listen(port, () => console.log(`app on http://localhost:${port}`));
