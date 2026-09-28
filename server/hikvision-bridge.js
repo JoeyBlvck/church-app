@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Bridge between a Hikvision clock-in terminal (face/fingerprint/card) and Church Manager.
+// Bridge between a Hikvision clock-in terminal (face/fingerprint/card) and The ChurchFlow.
 // Runs on a computer on the SAME LOCAL NETWORK as the device — it's just another
-// local-first "device" from Church Manager's point of view, using the exact same sync
+// local-first "device" from The ChurchFlow's point of view, using the exact same sync
 // client (app/js/sync.js) the browser app uses, so pushes get the same optimistic-
 // concurrency and permission handling for free.
 //
 // Setup (see README.md "Hikvision clock-in integration" for the full walkthrough):
-//   1. In Church Manager, create a staff account for the bridge to sign in as (Staff →
+//   1. In The ChurchFlow, create a staff account for the bridge to sign in as (Staff →
 //      Add account), role "secretary" is enough — it can write attendance.
 //   2. In Members, set each member's "Clock-in device ID" to their employee/person
 //      number on the Hikvision terminal (Members → open a member → Edit).
@@ -14,7 +14,7 @@
 //   4. Run:  node server/hikvision-bridge.js            (polls continuously)
 //            node server/hikvision-bridge.js --once      (one poll, then exit — for cron)
 //            node server/hikvision-bridge.js --probe     (dumps raw device events, no
-//                                                          Church Manager calls — use this
+//                                                          ChurchFlow calls — use this
 //                                                          first to confirm the device's
 //                                                          JSON matches what this script
 //                                                          expects; see hikvision.js)

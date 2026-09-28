@@ -1,0 +1,50 @@
+name: Build desktop app (Mac + Windows)
+
+# Builds unsigned installers for The ChurchFlow's desktop wrapper (Tauri) on macOS and
+# Windows, using GitHub's own hosted runners for each OS — this can't be done from a single
+# machine, since a real macOS build needs a real Mac and a real Windows build needs a real PC.
+#
+# Manual only for now (Actions tab → "Build desktop app (Mac + Windows)" → Run workflow),
+# so it doesn't burn CI minutes on every push while this is still early / unsigned. Once
+# this is ready for real users, this can be switched to trigger on version tags instead.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            label: mac
+          - platform: windows-latest
+            label: windows
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install the Tauri CLI
+        run: npm install
+
+      - name: Build the app (unsigned)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          uploadWorkflowArtifacts: true
+          args: --verbose

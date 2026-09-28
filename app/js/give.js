@@ -81,7 +81,7 @@ async function renderForm(tenantId) {
     info.logo ? h('img', { src: info.logo, alt: '', class: 'give-logo' }) : brand(),
     h('h1', {}, info.churchName), h('p', { class: 'subtitle' }, 'Give online — MTN MoMo, Telecel Cash, AirtelTigo, or card, via Paystack.'),
     f,
-    h('p', { class: 'give-footer' }, 'Powered by ', h('b', {}, 'Church Manager'))));
+    h('p', { class: 'give-footer' }, 'Powered by ', h('b', {}, 'The ChurchFlow'))));
 }
 
 // ---- the post-checkout confirmation screen: ?reference=<ref> (Paystack appends this itself) ----

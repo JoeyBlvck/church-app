@@ -1,2 +1,2 @@
-{ "name": "Church Manager", "short_name": "Church", "start_url": ".", "display": "standalone",
+{ "name": "The ChurchFlow", "short_name": "ChurchFlow", "start_url": ".", "display": "standalone",
   "background_color": "#f4f7fc", "theme_color": "#0d2b27", "icons": [] }

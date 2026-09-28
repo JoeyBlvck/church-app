@@ -1,0 +1,25 @@
+[package]
+name = "church-flow-desktop"
+version = "0.17.0"
+description = "The ChurchFlow — desktop wrapper for the local-first church management app"
+authors = ["Joey Studios"]
+edition = "2021"
+
+[lib]
+name = "church_flow_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

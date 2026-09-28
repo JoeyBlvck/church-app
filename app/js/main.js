@@ -13,7 +13,7 @@ import { staffView, announcementsView } from './views/people.js';
 import { programmesView } from './views/programmes.js';
 import { settingsView } from './views/settings.js';
 
-console.log('Church Manager build: v0.16.0 (QR self-check-in)'); // sanity check: confirms which build the browser actually loaded
+console.log('The ChurchFlow build: v0.17.0 (desktop app + rebrand)'); // sanity check: confirms which build the browser actually loaded
 
 const repo = createRepo(idbStore(), { baseUrl: API_URL });
 const root = document.getElementById('app');
@@ -369,7 +369,7 @@ async function render() {
   if (churchSettings.logo) fitLogoToBackground(brandMark, churchSettings.logo, getComputedStyle(document.documentElement).getPropertyValue('--panel'));
   root.replaceChildren(h('div', { class: 'shell' },
     h('nav', {}, h('div', { class: 'brand' }, brandMark,
-        h('h1', {}, 'Church ', h('span', {}, 'Manager'), h('small', {}, churchSettings.motto || 'Church management'))),
+        h('h1', {}, 'The Church', h('span', {}, 'Flow'), h('small', {}, churchSettings.motto || 'Church management'))),
       h('div', { class: 'navlinks' }, navItems),
       h('button', { class: 'signout', onclick: async () => { if (!pending || confirm(`${pending} changes haven't synced and will be lost. Sign out anyway?`)) { await repo.logout(); setTab(null); render(); } } }, h('span', { class: 'ico' }, icon('signout')), h('span', {}, 'Sign out'))),
     h('main', {}, h('div', { class: 'bar top' }, topBar), view),

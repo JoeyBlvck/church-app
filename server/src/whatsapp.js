@@ -2,7 +2,7 @@
 // its OWN WhatsApp Business API access — a phone number ID + access token, either straight from
 // Meta (developers.facebook.com, after completing Meta Business Verification) or through a BSP
 // such as Arkesel acting as the go-between — the same "bring your own account" pattern this app
-// already uses for SMS (server/src/sms.js) and Paystack (server/src/paystack.js): Church Manager
+// already uses for SMS (server/src/sms.js) and Paystack (server/src/paystack.js): The ChurchFlow
 // never sends on a church's behalf through a shared number, so there's no per-message cost or
 // compliance burden on Joey Studios.
 //

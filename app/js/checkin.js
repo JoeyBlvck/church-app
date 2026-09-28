@@ -61,7 +61,7 @@ async function renderForm(tenantId) {
     info.logo ? h('img', { src: info.logo, alt: '', class: 'give-logo' }) : brand(),
     h('h1', {}, info.churchName), h('p', { class: 'subtitle' }, "Checking in for today's service — enter the phone number on your member record."),
     f,
-    h('p', { class: 'give-footer' }, 'Powered by ', h('b', {}, 'Church Manager'))));
+    h('p', { class: 'give-footer' }, 'Powered by ', h('b', {}, 'The ChurchFlow'))));
 }
 
 const params = new URLSearchParams(location.search);
