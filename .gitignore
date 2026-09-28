@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Local SQLite database (each environment has its own; never commit real church data)
+*.db
+*.db-journal
+church.db
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local env / secrets
+.env
+.env.local
+
+# Editor
+.vscode/
+.idea/
+
+# Build output (Tauri desktop app, once scaffolded)
+src-tauri/target/
+dist/

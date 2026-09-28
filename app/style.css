@@ -1,0 +1,753 @@
+:root {
+  /* Theme pass: the app's original tokens were ported wholesale from the user's other project
+     (HotspotHub) — navy sidebar, blue primary, plain opaque cards, four tone-accent colors.
+     The sidebar and dashboard hero have since moved to a palette the user shared (near-black
+     #000201, teal #0C756F, gold #FDCF6F, cream #EFEADB); this pass carries that same palette
+     through the rest of the app's chrome, following the usage pattern from the user's reference
+     screenshot: teal for primary chrome (nav links, focus states, active tabs, icons), gold for
+     the main call-to-action buttons and highlights, cards stay plain white/opaque.
+     --navy/--navy-hover/--primary/--primary-hover/--accent (and its hover/ink)/--tone-* are NOT
+     redefined in dark mode below — same as before: these brand colors stay identical across the
+     light/dark toggle. */
+  --navy:#0d2b27; --navy-hover:#155249;
+  --primary:#0C756F; --primary-hover:#095e59;
+  --accent:#FDCF6F; --accent-hover:#f2b73f; --accent-ink:#3d2c05;
+  --tone-blue:#2463eb; --tone-teal:#0C756F; --tone-purple:#7541d5; --tone-orange:#b65b09;
+  --ink:#22334c; --mute:#596b83; --line:#e1e8f1;
+  --bg-base:#f4f7fc; --panel:#ffffff; --pill:#e1f2ef;
+  --bad:#b42318; --bad-bg:#fdeceb; --ok:#0d8a52; --ok-bg:#e3f6ec; --warn-bg:#fdf0e3; --warn-ink:#8a4a09;
+  --shadow:0 4px 20px rgba(24,54,100,.06), 0 1px 2px rgba(24,54,100,.05);
+  --shadow-lift:0 12px 32px rgba(24,54,100,.14), 0 2px 8px rgba(24,54,100,.07);
+  --radius:14px;
+  /* the dashboard hero's gradient, reused for the sidebar's hover/selected nav link so the two
+     "brand accent" moments in the app match — not redefined in dark mode, same as
+     --navy/--primary/--tone-* above: this one stays identical across the toggle too.
+     Palette: a dark-teal-to-teal gradient (a brightened #0d2b27 → #0C756F), with the warm gold
+     (#FDCF6F) and cream (#EFEADB) from the same set used for the hero's glow/text, per a palette
+     the user shared to try out here — the near-black starting point was lightened a step so the
+     dark end of the gradient doesn't read as flat black. */
+  --hero-gradient: linear-gradient(135deg, #0d2b27 0%, #155249 38%, #0C756F 72%, #17a696 100%);
+  --hero-glow: var(--accent); --hero-text: #EFEADB;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-base:#101c2e; --panel:#18283f; --pill:#173832;
+    --ink:#e3ebf8; --mute:#a8b8cf; --line:#334760;
+    --bad:#ff9a90; --bad-bg:rgba(180,35,24,.24); --ok:#59d99a; --ok-bg:rgba(13,138,82,.22); --warn-bg:rgba(182,91,9,.24); --warn-ink:#f0b673;
+    --shadow:0 4px 20px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
+    --shadow-lift:0 14px 40px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display:none !important; }
+html { color-scheme: light dark; }
+body {
+  margin:0; font:15px/1.48 'Inter',-apple-system,"Segoe UI",system-ui,sans-serif; color:var(--ink);
+  background:var(--bg-base);
+  min-height: 100vh;
+  font-feature-settings:'cv05','cv11'; /* Inter's single-story 'a' / 'l' with a tail — closer to the reference */
+}
+h2 { margin:0; font-size:23px; letter-spacing:-.01em; } h3 { margin:0 0 8px; } h4 { margin:16px 0 6px; }
+a { color:var(--primary); }
+.icon { display:inline-block; vertical-align:-4px; flex-shrink:0; }
+
+/* ---------- layout ---------- */
+.shell { display:grid; grid-template-columns:246px minmax(0,1fr); min-height:100vh; }
+nav {
+  position:sticky; top:0; height:100vh; overflow-y:auto; padding:26px 16px; color:var(--mute);
+  background:var(--panel); border-right:1px solid var(--line);
+}
+.brand { display:flex; align-items:center; gap:11px; padding:2px 8px 28px; }
+/* Plain by default — an uploaded church logo sits directly on the sidebar with no box around
+   it. The teal box (.icon) is only for the generic church icon shown when no logo is set;
+   .logo-boxed-light/dark are added by ui.js's fitLogoToBackground() only for the rare logo
+   whose own colours would otherwise blend into the sidebar. */
+.brand-mark { width:40px; height:40px; border-radius:12px; display:flex; align-items:center; justify-content:center; color:#fff; flex-shrink:0; }
+.brand-mark.icon { background:var(--primary); box-shadow:0 5px 16px color-mix(in srgb, var(--primary) 45%, transparent); }
+.brand-mark.logo-boxed-light { background:rgba(255,255,255,.94); box-shadow:0 2px 8px rgba(0,0,0,.18); }
+.brand-mark.logo-boxed-dark { background:rgba(20,26,36,.85); box-shadow:0 2px 8px rgba(0,0,0,.25); }
+nav h1 { font-size:19px; margin:0; font-weight:650; line-height:1.15; color:var(--ink); letter-spacing:-.02em; }
+nav h1 span { color:var(--primary); }
+nav h1 small { display:block; font-weight:600; font-size:9px; letter-spacing:1.4px; text-transform:uppercase; color:var(--mute); margin-top:6px; }
+.nav-title { color:var(--mute); opacity:1; letter-spacing:1.5px; font-size:10px; text-transform:uppercase; font-weight:700; margin:22px 14px 8px; }
+.nav-title:first-child { margin-top:0; }
+.account { display:flex; align-items:center; gap:10px; padding-left:16px; margin-left:4px; border-left:1px solid var(--line); }
+/* the top bar's account badge doubles as a link to "My profile" (see main.js) */
+.account.click { cursor:pointer; border-radius:10px; padding-block:4px; transition:background .15s; }
+.account.click:hover, .account.click:focus-visible { background:var(--pill); }
+.avatar { width:34px; height:34px; border-radius:50%; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:750; color:var(--primary);
+  background:var(--pill); border:2px solid var(--pill); }
+.account .who { min-width:0; }
+.account b { display:block; font-size:13px; font-weight:650; color:var(--ink); line-height:1.3; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:130px; }
+.account small { display:block; font-size:11px; color:var(--mute); text-transform:capitalize; font-weight:400; }
+.navlinks { display:flex; flex-direction:column; gap:2px; }
+/* hover and selected both use a flat teal (--primary), not the hero card's gradient — a solid
+   accent for the sidebar's own click/hover moment rather than borrowing the hero's treatment. */
+nav button { display:flex; gap:12px; align-items:center; width:100%; text-align:left; background:none; border:0; color:var(--mute); padding:11px 14px; border-radius:9px; font:inherit; font-size:13.5px; font-weight:550; cursor:pointer; min-height:44px; transition:background .15s, color .15s; }
+nav button:hover { background:var(--primary); color:#fff; }
+nav button:hover .ico { color:#fff; }
+nav button.on { background:var(--primary); color:#fff; font-weight:650; box-shadow:0 6px 16px color-mix(in srgb, var(--primary) 40%, transparent); }
+nav button.on .icon { color:#fff; }
+nav .signout { margin-top:22px; opacity:1; border-top:1px solid var(--line); padding-top:18px; color:var(--mute); }
+.ico { display:flex; color:var(--mute); }
+nav button.on .ico { color:#fff; }
+/* Phone's own bottom tab bar — a handful of primary tabs plus a "More" panel for the rest,
+   built fresh in main.js (see MOBILE_PRIMARY_PRIORITY) rather than reusing the sidebar's own
+   button list sideways: a horizontally-scrolling strip of every tab reset its scroll position
+   to the start on every navigation, so anything past the first few needed a fresh swipe before
+   it could even be tapped again. Hidden here; the @media block below is what actually shows it. */
+.mobile-tabbar { display:none; }
+/* 1080px used to cap every page well short of the sidebar's remaining space on anything
+   wider than a small laptop, leaving a large dead strip of blank background on the right —
+   the .grid tiles/cards below already reflow to fill whatever width they're given, so this
+   was just wasted screen, not a deliberate narrow-column layout. 1400px uses a typical
+   desktop window properly while still leaving a little breathing room on an ultra-wide
+   monitor instead of stretching tables edge to edge. */
+main { padding:24px 30px 44px; max-width:1400px; min-width:0; }
+.bar { display:flex; gap:10px; align-items:center; justify-content:flex-start; margin-bottom:16px; flex-wrap:wrap; }
+.bar.top { margin:-24px -30px 20px; padding:15px 30px; background:var(--panel); border-bottom:1px solid var(--line); }
+.bar.top .status { margin-right:auto; }
+.actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+p.actions { margin:14px 0 0; }
+.status { font-size:13px; color:var(--mute); display:flex; align-items:center; gap:2px; }
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--ok); margin-right:7px; box-shadow:0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+.dot.off { background:var(--tone-orange); box-shadow:0 0 0 3px color-mix(in srgb, var(--tone-orange) 22%, transparent); }
+
+/* ---------- page header (icon-in-a-soft-box + title + subtitle) ---------- */
+.page-head { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+.page-head-ico { width:46px; height:46px; border-radius:12px; background:var(--pill); color:var(--primary); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.page-head h2 { font-size:22px; }
+.page-head p { margin:3px 0 0; color:var(--mute); font-size:13px; }
+
+/* ---------- dashboard hero: a gradient card, in the spirit of the account-summary card from
+   the user's other project (HotspotHub) — church identity up top, a few headline numbers
+   along the bottom, not the same layout, colour or content, just the same "one card with your
+   name and stats on it" feeling — sits above the plain page-head/stat tiles below it.
+   Glass treatment: the badge and each stat are frosted panels (blur + translucency) floating
+   over a near-black-to-teal gradient, with a warm gold glow, a diagonal sheen and a large faint
+   watermark icon for decoration — the one place in the app that uses blur, deliberately, as a
+   one-off accent rather than the house style (the rest of the app stays flat/opaque). ---------- */
+.dash-hero {
+  position:relative; overflow:hidden; border-radius:18px; padding:24px 26px; margin-bottom:16px;
+  background:var(--hero-gradient);
+  color:var(--hero-text); box-shadow:0 18px 40px rgba(0,10,9,.4);
+}
+.dash-hero::before { /* soft decorative glow, purely cosmetic — warm gold against the cool teal/black base */
+  content:''; position:absolute; top:-90px; right:-60px; width:280px; height:280px; border-radius:50%;
+  background:radial-gradient(circle, color-mix(in srgb, var(--hero-glow) 55%, transparent), transparent 70%); pointer-events:none;
+}
+.dash-hero::after { /* diagonal glass sheen across the whole card */
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:linear-gradient(115deg, rgba(239,234,219,.14) 0%, rgba(239,234,219,0) 30%, rgba(239,234,219,0) 68%, rgba(239,234,219,.08) 100%);
+}
+.dash-hero-photo { /* an optional user-picked background photo (Settings → Church profile) —
+  sits on top of .dash-hero's own opaque gradient background but under the glow/sheen and all
+  real content, at an admin-chosen opacity capped at 70%, so the gradient's colour always shows
+  through it rather than the photo ever fully covering the gradient. */
+  position:absolute; inset:0; z-index:0; pointer-events:none;
+  background-size:cover; background-position:center;
+}
+.dash-hero-watermark { /* large faint icon, purely decorative, sits behind everything */
+  position:absolute; right:-18px; bottom:-26px; color:color-mix(in srgb, var(--hero-glow) 45%, transparent); transform:rotate(-6deg); z-index:0; pointer-events:none;
+}
+.dash-hero-watermark svg { width:170px; height:170px; }
+.dash-hero-top { display:flex; align-items:center; gap:15px; position:relative; z-index:1; }
+/* Plain by default, same reasoning as .brand-mark above — the uploaded logo sits directly on
+   the hero gradient with no frosted card behind it. .icon keeps the frosted-glass treatment
+   for the generic church icon fallback; .logo-boxed-light/dark are the rare contrast fallback. */
+.dash-hero-badge { width:52px; height:52px; border-radius:14px; color:var(--hero-text); flex-shrink:0;
+  display:flex; align-items:center; justify-content:center;
+}
+/* overflow:hidden lives ONLY here, not on the base rule above — it exists so the frosted
+   backdrop-filter box (Safari, in particular) actually respects the rounded corners. Putting
+   it on the base rule was clipping a real logo's own corners whenever the image filled the
+   whole 52×52 box (any square-ish logo, not just a wide one) — the exact "still cropped,
+   like it's in a placeholder shape" a logo with square art would show, even though the box
+   itself no longer paints a visible background behind a plain logo. */
+.dash-hero-badge.icon {
+  overflow:hidden;
+  background:rgba(239,234,219,.16); border:1px solid rgba(253,207,111,.35);
+  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px);
+  box-shadow:inset 0 1px 0 rgba(239,234,219,.30);
+}
+.dash-hero-badge.logo-boxed-light { background:rgba(255,255,255,.92); box-shadow:0 2px 10px rgba(0,0,0,.3); }
+.dash-hero-badge.logo-boxed-dark { background:rgba(13,20,18,.82); box-shadow:0 2px 10px rgba(0,0,0,.35); }
+.dash-hero-badge img { width:100%; height:100%; object-fit:contain; } /* the church logo — shown whole, not cropped */
+.dash-hero-id { min-width:0; }
+.dash-hero-name { font-size:20px; font-weight:700; letter-spacing:-.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#fff; }
+.dash-hero-tagline { margin-top:3px; font-size:13px; color:color-mix(in srgb, var(--hero-text) 82%, transparent); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dash-hero-stats { display:flex; gap:12px; margin-top:20px; position:relative; z-index:1; flex-wrap:wrap; }
+.dash-hero-stat {
+  padding:10px 18px; border-radius:13px; background:rgba(239,234,219,.12); border:1px solid rgba(253,207,111,.28);
+  backdrop-filter:blur(12px) saturate(160%); -webkit-backdrop-filter:blur(12px) saturate(160%);
+  box-shadow:inset 0 1px 0 rgba(239,234,219,.20);
+}
+.dash-hero-stat b { display:block; font-size:19px; font-weight:700; letter-spacing:-.01em; color:var(--hero-glow); }
+.dash-hero-stat span { font-size:11px; color:color-mix(in srgb, var(--hero-text) 75%, transparent); text-transform:uppercase; letter-spacing:.06em; }
+
+/* ---------- flat cards (no blur/translucency) ---------- */
+.card {
+  background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; margin-bottom:14px; box-shadow:var(--shadow);
+}
+.card.click, tr.click { cursor:pointer; transition:transform .12s, box-shadow .12s, border-color .12s; }
+.card.click:hover { border-color:color-mix(in srgb, var(--primary) 35%, var(--line)); box-shadow:var(--shadow-lift); transform:translateY(-2px); }
+tbody tr:hover td { background:var(--pill); }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr)); gap:14px; margin-bottom:14px; }
+.grid.wide { grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr)); }
+.grid > .card { margin-bottom:0; }
+.stat { position:relative; overflow:hidden; }
+.stat b { display:block; font-size:21px; letter-spacing:-.01em; } .stat span { color:var(--mute); font-size:13px; }
+.stat.click:hover { background:var(--panel); }
+.neg { color:var(--bad); }
+.voided { text-decoration:line-through; opacity:.55; }
+
+/* ---------- tables ---------- */
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:12px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { color:var(--mute); font-weight:700; font-size:11px; white-space:nowrap; text-transform:uppercase; letter-spacing:.05em; background:var(--bg-base); }
+tbody tr:last-child td { border-bottom:0; }
+
+/* Attendance's per-date folds (attendance.js): one collapsible <details> per date, closed by
+   default — click the date to reveal that day's own records, each still opening its usual detail
+   modal. th.sel-col's own header cell is left blank here since selection is scoped to the whole
+   page (see .filters "Select all on this page"), not one date at a time. */
+.attendance-fold { border:1px solid var(--line); border-radius:12px; margin-bottom:8px; overflow:hidden; }
+.attendance-fold summary { cursor:pointer; list-style:none; display:flex; align-items:center; gap:10px; padding:13px 14px; font-size:14px; }
+.attendance-fold summary::-webkit-details-marker { display:none; }
+.attendance-fold summary:hover { background:var(--bg-base); }
+.attendance-fold .chev { color:var(--mute); flex-shrink:0; transition:transform .15s; }
+.attendance-fold[open] .chev { transform:rotate(180deg); }
+.attendance-fold .fold-meta { color:var(--mute); font-size:12.5px; font-weight:500; margin-left:auto; }
+.attendance-fold table { border-top:1px solid var(--line); }
+.pager { display:flex; align-items:center; justify-content:center; gap:14px; margin-top:12px; }
+.pager .hint { margin:0; white-space:nowrap; }
+
+/* ---------- forms ---------- */
+input, select, textarea {
+  font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+  background:var(--panel); color:var(--ink); width:100%; min-height:42px;
+  transition:border-color .12s, box-shadow .12s;
+}
+input[type=checkbox] { width:auto; min-height:0; accent-color: var(--primary); }
+input[type=range] { width:auto; min-height:0; accent-color: var(--primary); padding:0; border:0; flex:1; }
+output { font-size:13px; font-weight:650; color:var(--mute); min-width:38px; }
+input:focus, select:focus, textarea:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent); }
+button:focus-visible { outline:2px solid var(--primary); outline-offset:2px; }
+label { display:block; font-size:12.5px; font-weight:600; color:var(--mute); margin:9px 0 4px; text-transform:uppercase; letter-spacing:.03em; }
+label.check { display:inline-flex; gap:6px; align-items:center; margin:4px 14px 4px 0; color:var(--ink); font-size:14px; text-transform:none; font-weight:400; }
+.sms-targets { margin:8px 0 4px; padding:10px 12px; background:var(--bg-base); border-radius:10px; }
+.hint { color:var(--mute); font-size:12.5px; }
+.row { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr)); gap:2px 12px; }
+.filters { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+.filters input, .filters select { width:auto; flex:1 1 150px; }
+form.inline { display:flex; gap:8px; margin:12px 0; } form.inline input { flex:1; }
+
+/* ---------- bulk selection (checkbox column + toolbar) ---------- */
+.bulk-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; background:var(--pill); border-radius:10px; padding:8px 12px; margin-bottom:10px; }
+.bulk-bar b { font-size:13px; font-weight:650; color:var(--ink); margin-right:2px; white-space:nowrap; }
+th.sel-col, td.sel-col { width:1px; padding-right:0; }
+td.sel-col input[type=checkbox], th.sel-col input[type=checkbox] { display:block; margin:0; }
+
+/* ---------- photos (member passport picture, church logo) ---------- */
+.avatar-img { border-radius:50%; object-fit:cover; flex-shrink:0; border:2px solid var(--pill); }
+.photo-pick { display:flex; align-items:center; gap:14px; margin:9px 0 4px; }
+.photo-pick input[type=file] { min-height:0; padding:8px; font-size:12.5px; }
+.photo-pick .btn.sm { margin-top:6px; }
+.photo-preview { width:64px; height:64px; border-radius:12px; background:var(--pill); color:var(--mute); flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.photo-preview.round { border-radius:50%; }
+.photo-preview img { width:100%; height:100%; object-fit:cover; }
+/* a logo (unlike a face or a background photo) shouldn't be cropped to fill the box — show
+   the whole thing, letterboxed, so nothing gets cut off. overflow:visible matters here too:
+   object-fit:contain never lets the image exceed its own box, but the box's overflow:hidden
+   (needed above for a cover-fit face photo) would still clip a logo's own corners whenever
+   its art reaches the edges of the square, against the box's rounded corners. */
+.photo-preview.fit-contain { overflow:visible; }
+.photo-preview.fit-contain img { object-fit:contain; }
+/* no border-radius on the image itself — rounding the <img>'s own box cut the corners off
+   any logo whose art reaches the edges of the square (most logos that aren't wide/thin like
+   the earlier test one). The rounded LOOK still comes through fine: .brand-mark's own
+   border-radius already rounds its background when a contrast placeholder box is shown. */
+.brand-mark img { width:100%; height:100%; object-fit:contain; }
+.name-cell { display:flex; align-items:center; gap:9px; }
+
+/* ---------- Members: a persistent list + detail split pane (see members.js), replacing a
+   wide table + a profile modal you open and close per person — one list on the left, whoever
+   is selected shown on the right, closer to how ChurchTrac's own People screen lays it out. ---- */
+.people-shell { display:grid; grid-template-columns:minmax(260px,340px) 1fr; gap:16px; align-items:start; }
+.people-list-pane { display:flex; flex-direction:column; gap:10px; }
+.people-filters { display:flex; flex-direction:column; gap:6px; }
+.people-filters label { margin:0 0 -2px; }
+.people-select-all { padding-top:2px; border-top:1px solid var(--line); }
+.people-list { list-style:none; margin:0; padding:0; max-height:min(64vh,640px); overflow-y:auto; }
+.people-row { display:flex; align-items:center; gap:10px; padding:9px 8px; border-radius:9px; cursor:pointer; }
+.people-row:hover { background:var(--bg-base); }
+.people-row.selected { background:var(--pill); }
+.people-row-who { flex:1; min-width:0; display:flex; flex-direction:column; }
+.people-row-who b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.people-detail-pane { min-height:360px; }
+.people-detail-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:60px 20px; color:var(--mute); text-align:center; }
+.people-detail-empty svg { opacity:.5; }
+.people-detail-head { display:flex; flex-wrap:wrap; align-items:center; gap:16px; margin-bottom:6px; }
+.people-detail-who { display:flex; align-items:center; gap:14px; flex:1 1 220px; min-width:0; }
+.people-detail-who h2 { margin:0 0 4px; font-size:20px; letter-spacing:-.01em; display:flex; align-items:center; gap:7px; }
+.people-detail-who-ico { color:var(--mute); flex-shrink:0; }
+.people-detail-head .actions { margin:0; }
+/* .btn (below, in the buttons section) sets its own display:inline-flex, and — same class
+   specificity, declared later — was winning the cascade over this rule, so the button showed
+   up on desktop too even though it's meant to be phone-only. .btn.people-back (two classes)
+   outranks plain .btn regardless of source order, so this one actually sticks. */
+.btn.people-back { display:none; } /* only relevant once .people-shell is stacked on phone, below */
+.print-table { display:none; } /* Export PDF's own printable table — see @media print below */
+
+/* ---------- "record card" (Details tab) ----------
+   A stacked label/value row list with the photo pinned to the top-right — the reference layout
+   the person shared, kept in our own teal/gold palette rather than switching to their blue. */
+.record-card { position:relative; padding-top:2px; }
+.record-photo { position:absolute; top:0; right:0; display:block; border:0; background:none; padding:0; border-radius:50%; cursor:pointer; transition:opacity .12s,transform .12s; }
+.record-photo:hover, .record-photo:focus-visible { opacity:.85; transform:scale(1.03); outline:none; }
+.record-list { display:flex; flex-direction:column; max-width:calc(100% - 132px); }
+.record-row { display:flex; flex-direction:column; gap:3px; padding:11px 2px; border-bottom:1px solid var(--line); }
+.record-row:last-child { border-bottom:none; }
+.record-label { font-size:11.5px; font-weight:650; text-transform:uppercase; letter-spacing:.04em; color:var(--mute); }
+.record-value { font-size:14.5px; font-weight:600; color:var(--ink); }
+/* The larger photo shown in the "View larger" modal opened by clicking .record-photo. */
+.photo-lightbox { display:flex; justify-content:center; padding:6px 0 10px; }
+/* A ministry's logo (or the plain church icon, when it has none) — on its card and its
+   own detail modal (.lg, a bit bigger there); see ministries.js's logoBadge(). */
+.ministry-card-head { display:flex; align-items:center; gap:9px; margin-bottom:2px; }
+.ministry-logo { width:26px; height:26px; border-radius:7px; object-fit:contain; background:var(--pill); padding:3px; flex-shrink:0; }
+.ministry-logo.lg { width:44px; height:44px; border-radius:10px; padding:5px; }
+
+/* A ministry's roster (ministries.js openMinistry): each member is a pill with a small "×" to
+   remove them from just this ministry, plus a select+button row underneath to add someone else
+   in — for owner/admin or the ministry's own leader only (see canManageRoster). */
+.roster-pills { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 4px; }
+.roster-pill { display:inline-flex; align-items:center; gap:6px; margin:0; }
+.roster-pill button { background:none; border:0; padding:0; width:16px; height:16px; flex-shrink:0;
+  display:flex; align-items:center; justify-content:center; border-radius:50%; color:inherit; opacity:.6; cursor:pointer; }
+.roster-pill button:hover, .roster-pill button:focus-visible { background:var(--bad-bg); color:var(--bad); opacity:1; outline:none; }
+.roster-add select { flex:1; }
+
+/* ---------- buttons ----------
+   The main call-to-action button uses the gold accent (not teal): per the reference, teal is for
+   primary chrome (nav, links, focus states) while gold marks the one thing on a screen you're
+   meant to click. Text is a dark ink rather than white, since gold is too light for white text. */
+.btn {
+  background:var(--accent); color:var(--accent-ink); border:1px solid var(--accent); border-radius:8px; padding:10px 16px; font:inherit; font-weight:650; cursor:pointer; text-decoration:none;
+  display:inline-flex; align-items:center; gap:7px; box-shadow:none;
+  transition:background .15s, border-color .15s, transform .1s;
+}
+.btn:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+.btn:active { transform:translateY(0); }
+.btn.ghost { background:var(--panel); color:var(--ink); border:1px solid var(--line); box-shadow:none; }
+.btn.ghost:hover { background:var(--bg-base); }
+.btn.danger { background:var(--bad-bg); color:var(--bad); border-color:color-mix(in srgb, var(--bad) 35%, var(--bad-bg)); }
+.btn.danger:hover { background:color-mix(in srgb, var(--bad) 16%, var(--bad-bg)); }
+.btn.block { width:100%; justify-content:center; }
+.btn.del { background:none; color:var(--bad); border:0; padding:9px 8px; box-shadow:none; }
+.btn.del:hover { background:var(--bad-bg); }
+.btn.sm { padding:7px 12px; font-size:13px; }
+.btn:disabled { opacity:.55; cursor:default; transform:none; }
+.icon-btn { background:var(--pill); border:0; border-radius:8px; width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:var(--mute); cursor:pointer; transition:background .12s, color .12s; }
+.icon-btn:hover { background:var(--bad-bg); color:var(--bad); }
+
+.err { color:var(--bad); margin:8px 0; }
+.pill { background:var(--pill); border-radius:99px; padding:3px 10px; font-size:12px; font-weight:600; margin:2px 4px 2px 0; display:inline-block; }
+.pill.warn { background:var(--warn-bg); color:var(--warn-ink); } .pill.bad { background:var(--bad-bg); color:var(--bad); }
+.pill.muted { background:var(--bg-base); color:var(--mute); border:1px solid var(--line); }
+.pill.good { background:var(--ok-bg); color:var(--ok); }
+/* A registration row's status <select> + remove button: without this, the select's default
+   width:100% (see input/select/textarea above) fights the remove button for the same narrow
+   table cell and wraps onto its own line. */
+.reg-row-actions { flex-wrap:nowrap; }
+.reg-row-actions select { width:auto; min-width:112px; }
+.empty { color:var(--mute); text-align:center; padding:22px 8px; margin:0; }
+ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7px 0; border-bottom:1px solid var(--line); } ul.plain li:last-child { border:0; }
+.tabs { display:flex; gap:4px; margin-bottom:14px; background:var(--bg-base); padding:4px; border-radius:10px; width:fit-content; }
+.tabs button { background:none; border:0; border-radius:7px; padding:8px 14px; font:inherit; font-size:13.5px; color:var(--mute); cursor:pointer; transition:background .15s, color .15s; }
+.tabs button.on { color:#fff; background:var(--primary); font-weight:650; }
+.checklist { max-height:280px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:8px; background:var(--bg-base); }
+.kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:10px; }
+.feed { padding:9px 0; border-bottom:1px solid var(--line); }
+/* One category section ("Welfare" / "Tithe" / "Donation") in the member "Full details" print —
+   see fullDetails in members.js. Each is its own subtotal line, never combined into one total. */
+.giving-cat { margin-bottom:12px; } .giving-cat:last-child { margin-bottom:0; }
+.giving-cat-head { display:flex; justify-content:space-between; align-items:baseline; padding-bottom:6px; margin-bottom:2px; border-bottom:2px solid var(--pill); }
+.giving-cat-head b { color:var(--primary); }
+.meter { height:8px; background:var(--pill); border-radius:9px; overflow:hidden; min-width:80px; }
+.meter i { display:block; height:100%; background:var(--ok); }
+.chart { width:100%; max-width:520px; height:auto; display:block; }
+.chart .col { fill:var(--primary); } .chart text { fill:var(--mute); font-size:10px; } .chart .val { fill:var(--ink); font-weight:600; }
+.chart.donut { width:130px; height:130px; max-width:130px; flex-shrink:0; }
+.donut-wrap { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.legend { list-style:none; margin:0; padding:0; flex:1; min-width:140px; }
+.legend li { display:flex; align-items:center; gap:8px; padding:4px 0; font-size:13.5px; }
+.legend i { width:10px; height:10px; border-radius:3px; flex-shrink:0; display:inline-block; }
+.legend span { flex:1; text-transform:capitalize; color:var(--mute); }
+.legend b { font-weight:600; }
+
+/* ---------- top-bar workspace search (plain pill, HotspotHub-style) ---------- */
+/* .topsearch-wrap positions the dropdown relative to the pill itself, not the whole top bar,
+   so it never drifts if other top-bar items (sync status, account) change width. */
+.topsearch-wrap { position:relative; flex:1 1 240px; max-width:360px; }
+.topsearch { display:flex; align-items:center; gap:9px; background:var(--bg-base); border:1px solid var(--line); border-radius:9px;
+  padding:9px 14px; width:100%; color:var(--mute); }
+.topsearch input { border:0; background:none; padding:0; min-height:auto; width:100%; color:var(--ink); }
+.topsearch input:focus { box-shadow:none; }
+.topsearch .icon { flex-shrink:0; }
+/* the "search everything" dropdown: members, ministries, programmes and notices, grouped,
+   as soon as there's a match — see main.js's globalSearchBar() */
+.topsearch-results { position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:50;
+  background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-lift);
+  max-height:60vh; overflow-y:auto; padding:6px; }
+.topsearch-group { padding:8px 10px 4px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); }
+.topsearch-result { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; cursor:pointer; }
+.topsearch-result:hover, .topsearch-result:focus-visible { background:var(--pill); outline:none; }
+.topsearch-result .ico { color:var(--primary); flex-shrink:0; }
+.topsearch-result b { display:block; font-size:13.5px; font-weight:600; color:var(--ink); }
+.topsearch-result .hint { margin-top:1px; }
+.topsearch-empty { padding:14px 10px; color:var(--mute); font-size:13px; text-align:center; }
+
+/* ---------- notification bell (top bar) ---------- */
+/* A native <details>/<summary> disclosure (see main.js's notificationBell()) rather than
+   hand-rolled open/close state — no outside-click handling needed, and every navigation
+   already triggers a full render() that rebuilds it closed from scratch. */
+.notif-bell { position:relative; flex-shrink:0; }
+.notif-bell summary { list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  width:38px; height:38px; border-radius:10px; color:var(--mute); position:relative; transition:background .15s, color .15s; }
+.notif-bell summary::-webkit-details-marker { display:none; }
+.notif-bell summary:hover, .notif-bell[open] summary { background:var(--pill); color:var(--primary); }
+.notif-badge { position:absolute; top:2px; right:2px; min-width:16px; height:16px; padding:0 4px; border-radius:99px;
+  background:var(--bad); color:#fff; font-size:10px; font-weight:700; line-height:16px; text-align:center; }
+.notif-dropdown { position:absolute; top:calc(100% + 6px); right:0; z-index:50; width:300px; max-height:60vh; overflow-y:auto;
+  background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-lift); padding:6px; }
+.notif-dropdown-head { display:flex; align-items:center; justify-content:space-between; padding:8px 10px 4px; gap:8px; }
+.notif-dropdown-title { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:var(--mute); }
+.notif-clear { border:0; background:none; padding:2px 4px; font:inherit; font-size:11.5px; font-weight:600; color:var(--primary); cursor:pointer; border-radius:6px; }
+.notif-clear:hover, .notif-clear:focus-visible { background:var(--pill); outline:none; }
+.notif-item { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border-radius:8px;
+  font-size:13px; color:var(--ink); cursor:pointer; }
+.notif-item:hover, .notif-item:focus-visible { background:var(--pill); outline:none; }
+.notif-item .ico { color:var(--primary); flex-shrink:0; }
+.notif-text { flex:1; min-width:0; }
+.notif-dismiss { flex-shrink:0; display:flex; align-items:center; justify-content:center; width:22px; height:22px;
+  border-radius:6px; border:0; background:none; color:var(--mute); cursor:pointer; opacity:0; transition:opacity .1s, background .1s, color .1s; }
+.notif-item:hover .notif-dismiss, .notif-item:focus-within .notif-dismiss, .notif-dismiss:focus-visible { opacity:1; }
+.notif-dismiss:hover, .notif-dismiss:focus-visible { background:var(--line); color:var(--ink); outline:none; }
+.notif-empty { padding:10px; text-align:center; }
+
+/* ---------- dropdown menu (ui.js's menu()) ---------- */
+/* Same native <details>/<summary> approach as the notification bell above, just with a labeled
+   "Button ▾" trigger instead of an icon-only one — see main.js's outside-click handler, which
+   closes both. */
+.menu { position:relative; display:inline-flex; }
+.menu summary { list-style:none; cursor:pointer; }
+.menu summary::-webkit-details-marker { display:none; }
+.menu summary svg { margin-left:2px; transition:transform .15s; }
+.menu[open] summary svg { transform:rotate(180deg); }
+.menu-dropdown { position:absolute; top:calc(100% + 6px); right:0; z-index:50; min-width:190px;
+  background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-lift); padding:6px; display:flex; flex-direction:column; gap:1px; }
+.menu-item { display:flex; align-items:center; gap:9px; width:100%; padding:9px 10px; border-radius:8px;
+  font:inherit; font-size:13.5px; font-weight:550; color:var(--ink); text-align:left; background:none; border:0; cursor:pointer; text-decoration:none; }
+.menu-item:hover, .menu-item:focus-visible { background:var(--pill); outline:none; }
+.menu-item.danger { color:var(--bad); }
+
+/* ---------- ring/percentage stat widgets (members-by-status) ---------- */
+.ring-row { display:flex; gap:16px; flex-wrap:wrap; }
+.ring-stat { display:flex; flex-direction:column; align-items:center; gap:6px; width:84px; text-align:center; }
+.ring-stat span { font-size:12px; color:var(--mute); text-transform:capitalize; line-height:1.25; }
+.chart.ring { width:76px; height:76px; max-width:76px; flex-shrink:0; }
+
+/* ---------- flat stat tiles with a short colored top-accent tab (dashboard) ---------- */
+.tone-blue { --section-accent:var(--tone-blue); } .tone-teal { --section-accent:var(--tone-teal); }
+.tone-purple { --section-accent:var(--tone-purple); } .tone-orange { --section-accent:var(--tone-orange); }
+.stat.tile { display:flex; flex-wrap:wrap; align-items:center; gap:0 13px; }
+.stat.tile::before { content:''; order:-1; flex-basis:100%; width:26px; height:4px; border-radius:4px; margin-bottom:14px;
+  background:var(--section-accent, var(--primary)); }
+.stat.tile .stat-ico { width:40px; height:40px; border-radius:11px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  background:color-mix(in srgb, var(--section-accent, var(--primary)) 14%, transparent); color:var(--section-accent, var(--primary)); }
+.stat.tile .stat-body { min-width:0; }
+.stat.tile b { font-size:21px; font-weight:750; letter-spacing:-.02em; }
+
+/* ---------- feed-style "recent activity" list (dashboard) ---------- */
+.feed-list { list-style:none; margin:0; padding:0; }
+.feed-list li { display:flex; gap:10px; align-items:flex-start; padding:8px 10px; margin-bottom:6px; border-left:3px solid var(--primary); border-radius:0 10px 10px 0;
+  background:var(--bg-base); }
+.feed-list li:last-child { margin-bottom:0; }
+.feed-list .fi-ico { width:28px; height:28px; border-radius:50%; background:var(--pill); color:var(--primary); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.feed-list .fi-body { min-width:0; flex:1; font-size:13.5px; }
+.feed-list time { display:block; color:var(--mute); font-size:12px; margin-top:1px; }
+/* Compact month/day chip, used in place of .fi-ico for the "Upcoming programmes" list — an
+   at-a-glance date read (like a paper calendar page) instead of a plain icon. */
+.date-chip { width:40px; flex-shrink:0; border-radius:9px; background:var(--pill); color:var(--primary); text-align:center; padding:3px 0 4px; line-height:1.15; }
+.date-chip span { display:block; font-size:9px; font-weight:750; letter-spacing:.04em; }
+.date-chip b { display:block; font-size:15px; font-weight:750; }
+.receipt .big { font-size:26px; font-weight:700; }
+
+/* ---------- Members' "Export PDF" masthead — invisible on screen, shown only when printing
+   (see @media print below). window.print() prints the page as-is, so this just needs to exist
+   in the DOM ahead of time; it picks up the church's own teal/gold palette rather than a plain
+   black-and-white printout. */
+.pdf-header { display:none; }
+.pdf-header-brand { display:flex; align-items:center; gap:12px; }
+.pdf-header-brand img, .pdf-header-brand svg { width:40px; height:40px; object-fit:contain; color:var(--primary); }
+.pdf-header-name { font-size:19px; font-weight:800; color:var(--primary); letter-spacing:-.01em; }
+.pdf-header-sub { font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--accent-hover); margin-top:2px; }
+.pdf-header-meta { font-size:12px; color:var(--mute); text-align:right; }
+
+/* ---------- one member's own printable card (Members → click a member → Print card) — same
+   invisible-until-printed trick and teal/gold palette as the masthead above, just scoped to a
+   single person's modal instead of the whole roster; see .print-only utility under @media
+   print. Same-name .pdf-header-sub above is reused here for the small church-name line. */
+.print-only { display:none; }
+/* Member card's two print tiers: "Print card" (basic-only) vs "Full details" (full-only),
+   toggled by whether body.printing-full is set when window.print() is called — see @media
+   print below and openProfile()'s two print buttons in members.js. Both start hidden on
+   screen; full-only also stays hidden on the plain "Print card" printout. */
+.basic-only, .full-only { display:none; }
+.member-card-head { padding-bottom:12px; margin-bottom:14px; }
+.member-card-who { display:flex; align-items:center; gap:14px; margin-top:8px; }
+.member-card-who h3 { margin:0 0 6px; font-size:21px; color:var(--ink); }
+
+/* ---------- modal: plain opaque sheet, no blur ---------- */
+.backdrop {
+  position:fixed; inset:0; z-index:20; display:flex; align-items:flex-start; justify-content:center; padding:5vh 12px; overflow-y:auto;
+  background:rgba(16,30,56,.55);
+  animation:fadeIn .16s ease-out;
+}
+.backdrop.closing { animation:fadeOut .14s ease-in forwards; }
+.backdrop.closing .modal { animation:popOut .14s ease-in forwards; }
+@keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
+@keyframes fadeOut { from { opacity:1; } to { opacity:0; } }
+@keyframes popIn { from { opacity:0; transform:translateY(10px) scale(.97); } to { opacity:1; transform:none; } }
+@keyframes popOut { from { opacity:1; transform:none; } to { opacity:0; transform:translateY(6px) scale(.98); } }
+.modal {
+  background:var(--panel); border:1px solid var(--line); border-radius:16px; width:100%; max-width:480px;
+  box-shadow:0 24px 70px rgba(16,30,56,.28);
+  animation:popIn .18s cubic-bezier(.2,.9,.3,1.2);
+}
+.modal.wide { max-width:760px; }
+/* A member's profile is the main thing that needs this: stat tiles, the kv detail grid and the
+   giving card all reflow into extra columns once they have the room (see .grid/.kv further up),
+   rather than stacking single-file the way the narrower default modal forces them to. */
+.modal.xwide { max-width:920px; }
+.modal-head { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid var(--line); }
+.modal-head b { font-size:16px; }
+.modal-body { padding:16px 18px 18px; }
+#toasts { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:30; max-width:min(380px,calc(100vw - 28px)); }
+.toast {
+  background:var(--navy); color:#fff; padding:11px 15px; border-radius:10px;
+  box-shadow:0 10px 30px rgba(16,30,56,.35); border:1px solid rgba(255,255,255,.1);
+  animation:popIn .18s ease-out;
+}
+.toast.err { background:var(--bad); }
+
+/* ---------- login (admin.js's own separate operator console) ---------- */
+/* Ported from the same HotspotHub source as the rest of the app's design (accounts/login.html +
+   dashboard/static/dashboard/ui.css: .login-page/.login-card) — a full-bleed navy backdrop with
+   a single centered white card, brand mark inside the card (not floating above it), and a
+   full-width primary button. Kept exactly as-is for admin.js, which reuses these same two
+   classes for its own small login/retry screens; the church app's own login below has since
+   moved to .login-shell instead. */
+.login-page { min-height:100vh; display:grid; place-items:center; padding:24px; background:var(--navy); }
+.login-card { width:min(440px,100%); padding:34px; text-align:left; }
+.login-card .brand-row { display:flex; align-items:center; gap:12px; margin-bottom:24px; }
+.login-card .brand-mark { width:44px; height:44px; border-radius:13px; display:flex; align-items:center; justify-content:center; color:#fff; flex-shrink:0;
+  background:var(--primary); box-shadow:0 8px 22px color-mix(in srgb, var(--primary) 45%, transparent); }
+.login-card .wordmark { font-size:19px; font-weight:650; letter-spacing:-.02em; color:var(--ink); line-height:1.15; }
+.login-card .wordmark span { color:var(--primary); }
+.login-card h1 { font-size:23px; margin:0 0 5px; letter-spacing:-.01em; }
+.login-card .subtitle { color:var(--mute); font-size:13.5px; margin:0 0 22px; }
+.login-card .btn.block { width:100%; margin-top:8px; }
+.login-card label:first-of-type { margin-top:0; }
+.switch { text-align:center; margin-top:20px; font-size:13.5px; color:var(--mute); }
+.center { text-align:center; }
+
+/* ---------- login (the church app's own sign-in/registration) ---------- */
+/* Two panes side by side on anything wide enough: a hero-gradient info pane (same gradient/glow/
+   frosted-badge language as the dashboard hero, see .dash-hero above) selling what the app does,
+   next to the actual form — a more typical "marketing login" layout than a lone card on a plain
+   backdrop. .login-card (padding, brand-row, h1/subtitle sizing, full-width button) is reused
+   as-is inside .login-main; only the page-level wrapper is new. */
+.login-shell { min-height:100vh; display:grid; grid-template-columns:minmax(320px,1fr) minmax(0,1fr); background:var(--bg-base); }
+.login-aside {
+  position:relative; overflow:hidden; display:flex; align-items:center;
+  background:var(--hero-gradient); color:var(--hero-text); padding:56px;
+}
+.login-aside::before { /* same soft gold glow as .dash-hero::before */
+  content:''; position:absolute; top:-110px; left:-70px; width:340px; height:340px; border-radius:50%;
+  background:radial-gradient(circle, color-mix(in srgb, var(--hero-glow) 45%, transparent), transparent 70%); pointer-events:none;
+}
+.login-aside-watermark { position:absolute; right:-30px; bottom:-30px; color:color-mix(in srgb, var(--hero-glow) 35%, transparent); transform:rotate(-6deg); z-index:0; pointer-events:none; }
+.login-aside-body { position:relative; z-index:1; max-width:420px; }
+.login-aside-brand { display:flex; align-items:center; gap:12px; margin-bottom:40px; }
+.login-aside-brand .brand-mark {
+  background:rgba(239,234,219,.16); border:1px solid rgba(253,207,111,.35);
+  backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); box-shadow:inset 0 1px 0 rgba(239,234,219,.30);
+}
+.login-aside-brand .wordmark { font-size:19px; font-weight:650; letter-spacing:-.02em; line-height:1.15; color:#fff; }
+.login-aside-brand .wordmark span { color:var(--hero-glow); }
+.login-aside h2 { font-size:27px; letter-spacing:-.015em; margin:0 0 10px; color:#fff; }
+.login-aside-body > p { color:color-mix(in srgb, var(--hero-text) 85%, transparent); font-size:14.5px; line-height:1.55; margin:0 0 26px; }
+.login-features { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:14px; }
+.login-features li { display:flex; align-items:center; gap:12px; font-size:14px; color:var(--hero-text); }
+.login-features .ico {
+  width:30px; height:30px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  background:rgba(239,234,219,.14); border:1px solid rgba(253,207,111,.28); color:var(--hero-glow);
+}
+.login-main { display:flex; align-items:center; justify-content:center; padding:24px; }
+/* Hidden on desktop (the aside above already carries the brand) — matches .login-card
+   .brand-row's own specificity so it actually wins over that display:flex, rather than being a
+   single-class selector that rule would otherwise beat regardless of source order. */
+.login-card .login-mobile-brand { display:none; }
+
+/* ---- password reveal toggle + strength meter (login/registration; see passwordField() in
+   ui.js) ---- */
+.pw-wrap { position:relative; display:flex; }
+.pw-wrap input { padding-right:42px; }
+.pw-toggle {
+  position:absolute; right:4px; top:50%; transform:translateY(-50%); width:32px; height:32px;
+  border:0; border-radius:8px; background:none; color:var(--mute); display:flex; align-items:center; justify-content:center;
+  cursor:pointer; transition:background .12s, color .12s;
+}
+.pw-toggle:hover, .pw-toggle:focus-visible { background:var(--pill); color:var(--primary); outline:none; }
+.pw-meter { display:flex; align-items:center; gap:8px; margin-top:8px; }
+.pw-meter-track { flex:1; height:5px; border-radius:99px; background:var(--line); overflow:hidden; }
+.pw-meter-bar { height:100%; width:0; border-radius:99px; transition:width .15s ease, background .15s ease; }
+.pw-meter-bar.s0, .pw-meter-bar.s1 { background:var(--bad); }
+.pw-meter-bar.s2 { background:var(--accent-hover); }
+.pw-meter-bar.s3 { background:var(--primary); }
+.pw-meter-bar.s4 { background:var(--ok); }
+.pw-meter-label { font-size:11.5px; font-weight:650; white-space:nowrap; }
+.pw-meter-label.s0, .pw-meter-label.s1 { color:var(--bad); }
+.pw-meter-label.s2 { color:var(--warn-ink); }
+.pw-meter-label.s3 { color:var(--primary); }
+.pw-meter-label.s4 { color:var(--ok); }
+
+/* ---- public online giving page (app/give.html, app/js/give.js) — reuses .login-page/.login-card
+   as-is (see the admin console comment above); these few rules are only what that page adds on
+   top: a wider card (it holds a whole donation form, not just email+password), the row of quick
+   -amount chips, the church logo in place of the generic brand mark, and the thank-you check. ---- */
+.give-card { width:min(480px,100%); }
+.give-logo { max-height:52px; max-width:220px; object-fit:contain; margin-bottom:18px; }
+.give-quick { display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 4px; }
+.give-quick .btn.on { background:var(--primary); color:#fff; border-color:var(--primary); }
+.give-check { width:64px; height:64px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 0 14px;
+  background:var(--ok-bg); color:var(--ok); }
+.give-footer { text-align:center; color:var(--mute); font-size:12px; margin:22px 0 0; }
+
+/* ---- QR self-check-in card (Settings > "QR check-in") — the code itself sits beside the link/
+   download controls on a wide screen, and stacks above them on a phone. ---- */
+.checkin-qr-row { display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; margin:10px 0; }
+.checkin-qr { border:1px solid var(--border); border-radius:8px; background:#fff; width:170px; height:170px; }
+.checkin-qr-actions { display:flex; flex-direction:column; gap:10px; min-width:240px; flex:1; }
+.checkin-qr-actions .row { display:flex; gap:8px; }
+.checkin-qr-actions .row input { flex:1; }
+
+@media (max-width:760px) {
+  .card > table, .modal table { display:block; overflow-x:auto; }
+  .shell { grid-template-columns:minmax(0,1fr); padding-bottom:70px; }
+  /* The info pane doesn't fit on a phone screen next to a usable form, so it's simply not
+     shown — same single centered card the church app's login always had, just with the nicer
+     form controls (password reveal/strength) still in place. The brand mark that would
+     otherwise be missing moves into the card itself. */
+  .login-shell { grid-template-columns:1fr; }
+  .login-aside { display:none; }
+  .login-card .login-mobile-brand { display:flex; }
+  /* Members: one column at a time on phone instead of two panes squeezed side by side —
+     the list by default, swapping to the selected person's detail (and back) via
+     .showing-detail, which selectMember()/backToList in members.js toggle. */
+  .people-shell { grid-template-columns:1fr; }
+  .people-shell:not(.showing-detail) .people-detail-pane { display:none; }
+  .people-shell.showing-detail .people-list-pane { display:none; }
+  .btn.people-back { display:inline-flex; }
+  /* The sidebar itself is desktop-only on phone — .mobile-tabbar (further down) stands in for
+     it, a fixed bar at the bottom of the screen instead of a scrolling strip of every tab. */
+  nav { display:none; }
+  /* This is a plain <nav>, same as the sidebar — top/height/border-right/overflow-y here all
+     override the base (tag-selector) `nav { ... }` rule up top, which otherwise leaks in and
+     stretches this into a full-height column (top:0 + height:100vh + this rule's own bottom:0
+     leaves 'bottom' over-constrained and ignored, so the "bar" ends up covering the full
+     screen instead of sitting slim at the bottom of it). */
+  .mobile-tabbar {
+    display:flex; position:fixed; top:auto; bottom:0; left:0; right:0; height:auto; z-index:10;
+    gap:2px; padding:6px; overflow-y:visible; border-right:none;
+    background:var(--panel); border-top:1px solid var(--line); box-shadow:0 -6px 24px rgba(6,12,26,.3);
+  }
+  .mobile-tabbar > button, .mobile-more summary {
+    flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:7px 4px;
+    font:inherit; font-size:10.5px; font-weight:600; color:var(--mute); background:none; border:0;
+    border-radius:12px; cursor:pointer; min-height:0; list-style:none;
+  }
+  .mobile-tabbar > button.on, .mobile-more[open] summary { background:var(--primary); color:#fff; }
+  .mobile-tabbar > button .ico, .mobile-more summary .ico { color:inherit; }
+  .mobile-more { position:relative; flex:1; display:flex; }
+  .mobile-more summary::-webkit-details-marker { display:none; }
+  /* Opens upward, not down like ui.js's own menu() — this bar sits at the bottom of the
+     screen, so a dropdown anchored below its summary would open off-screen. Anchored to the
+     right edge, not centered under the summary: "More" is the last (rightmost) button in the
+     bar, so a centered sheet would run off the right edge of the screen on a narrow phone. */
+  .mobile-more-sheet {
+    position:absolute; bottom:calc(100% + 10px); right:0; z-index:1;
+    min-width:190px; background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    box-shadow:var(--shadow-lift); padding:6px; display:flex; flex-direction:column; gap:1px;
+  }
+  .mobile-more-sheet button {
+    flex-direction:row; justify-content:flex-start; gap:10px; padding:10px 12px; width:100%;
+    font-size:13.5px; font-weight:550; color:var(--ink); border-radius:9px; white-space:nowrap;
+  }
+  /* Same bleed-through as the .on rule below, on hover/focus instead of selected: the base
+     stylesheet's `nav button:hover` also reaches these (still a <button> inside a <nav>),
+     filling in white text that this rule didn't override, over a light background — nearly
+     as invisible as the .on bug this comment sits next to. Setting color here too. */
+  .mobile-more-sheet button:hover, .mobile-more-sheet button:focus-visible { background:var(--pill); color:var(--ink); outline:none; }
+  /* The base stylesheet's own `nav button.on` (for the desktop sidebar) reaches into here too —
+     .mobile-more-sheet is nested inside a <nav>, so that descendant selector still matches
+     these buttons and was filling in a teal background (var(--primary)) that this rule only
+     overrode the text color on top of, leaving teal-on-teal: invisible label text on the
+     selected item. Setting the background here too (a light tint, matching how "selected" reads
+     elsewhere in this list, e.g. .people-row.selected) fully replaces it instead of layering
+     on top of it. */
+  .mobile-more-sheet button.on { background:var(--pill); color:var(--primary); font-weight:650; }
+  main { padding:14px 14px 30px; }
+  .bar.top { margin:-14px -14px 10px; padding:12px 14px; }
+  .account .who { display:none; }
+  .account { border-left:0; padding-left:0; margin-left:0; }
+  .backdrop { padding:0; align-items:flex-end; }
+  .dash-hero { padding:18px 18px 20px; border-radius:14px; }
+  .dash-hero-stats { gap:18px 24px; margin-top:18px; padding-top:14px; }
+  .modal, .modal.wide, .modal.xwide { max-width:none; border-radius:20px 20px 0 0; animation:slideUp .2s ease-out; }
+  @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
+  #toasts { bottom:82px; }
+}
+@media print {
+  nav, .noprint, .bar, .filters, .backdrop > .modal .modal-head, #toasts { display:none !important; }
+  body { background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .shell { display:block; } .card { border:0; box-shadow:none; }
+  /* Hiding nav/main alone left .shell's own min-height:100vh behind — an empty first page
+     before the modal's content on anything printed this way (this member card, and Finance's
+     transaction receipt, which uses the same printing-modal trick). Hiding the whole .shell
+     wrapper removes that reserved height instead of just what's inside it. */
+  body.printing-modal .shell { display:none; }
+  .backdrop { position:static; background:none; padding:0; }
+  /* Members' "Export PDF": a teal-and-gold masthead over a plain table, the church's own
+     palette rather than a generic black-and-white printout. print-color-adjust above is what
+     makes the header rule/table tint actually reach the page instead of being stripped out. */
+  .pdf-header { display:flex; align-items:center; justify-content:space-between; gap:16px;
+    padding-bottom:14px; margin-bottom:14px; border-bottom:3px solid var(--primary); }
+  .print-table { display:table; } /* Members' Export PDF — .people-shell (.noprint) is hidden above, this stands in for it */
+  table th { background:var(--pill) !important; color:var(--primary) !important; }
+  .modal { box-shadow:none; max-width:none; animation:none; }
+  /* One member's own "Print card" (see .print-only above): the modal head's title is hidden
+     (rule above), so .member-card-head is this printout's real title instead. */
+  .print-only { display:block; }
+  .member-card-head { border-bottom:3px solid var(--primary); }
+  .basic-only { display:block; }
+  body.printing-full .basic-only { display:none; }
+  body.printing-full .full-only { display:block; }
+  body.printing-full .grid.full-only { display:grid; }
+  /* Offering isn't tracked as an individual's giving on the printed "Full details" report
+     (it's collected and banked as a lump sum) — hide any offering row even if printing. */
+  .giving-offering { display:none; }
+}

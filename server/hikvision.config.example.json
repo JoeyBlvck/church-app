@@ -1,0 +1,15 @@
+{
+  "device": {
+    "host": "http://192.168.1.64",
+    "username": "admin",
+    "password": "device-admin-password"
+  },
+  "churchManager": {
+    "apiUrl": "http://localhost:8787",
+    "email": "clockin@yourchurch.org",
+    "password": "a-password-for-the-clock-in-account"
+  },
+  "service": "Sunday service",
+  "pollSeconds": 30,
+  "stateFile": ".hikvision-state.json"
+}

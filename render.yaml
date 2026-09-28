@@ -1,0 +1,52 @@
+# Render Blueprint for Church Manager.
+# Deploy: push this repo to GitHub, then in Render click New > Blueprint and point it at the repo.
+# Render reads this file and creates both services below in one go.
+#
+# After the first deploy:
+#   1. Note the Web Service's URL (e.g. https://church-manager-server.onrender.com) and set it as
+#      PRODUCTION_API_URL in app/js/config.js, then commit + push (Render auto-redeploys the static site).
+#   2. In the Render dashboard, open the Web Service > Environment and fill in the secrets marked
+#      "sync: false" below (they are intentionally left out of git).
+#   3. The Web Service has a persistent disk mounted at /data for church.db, with Render's built-in
+#      automatic daily snapshots (7-day retention) as a baseline safety net.
+
+services:
+  # --- Backend: sync server + REST API ---
+  - type: web
+    name: church-manager-server
+    runtime: node
+    plan: starter
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:
+      name: church-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /data/church.db
+      - key: JWT_SECRET
+        sync: false # generate a long random string; required in production
+      - key: SUPER_ADMIN_EMAIL
+        sync: false # login for the platform-admin console (app/admin.html)
+      - key: SUPER_ADMIN_PASSWORD
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false # only needed if using the WhatsApp check-in/webhook integration
+
+  # --- Frontend: static site served directly ---
+  # No SPA catch-all rewrite here on purpose: the app does its own in-page view switching
+  # (no pathname-based routing), and this folder also serves standalone public pages
+  # (give.html, checkin.html, admin.html) that must be reachable at their own exact paths.
+  - type: web
+    name: church-manager-app
+    runtime: static
+    rootDir: app
+    buildCommand: "true" # no build step — static files are served as-is
+    staticPublishPath: .
+    autoDeploy: true

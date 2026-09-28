@@ -1,0 +1,2 @@
+{ "name": "church-app", "version": "0.1.0", "private": true, "type": "module",
+  "scripts": { "test": "node --no-warnings --test test/sync.test.js test/csv.test.js test/importers.test.js", "serve": "node serve.js" } }
