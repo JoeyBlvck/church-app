@@ -8,7 +8,7 @@ A multi-tenant, local-first church management system: works fully offline on eac
 |---|---|
 | `server/` sync + auth API: multi-tenant, roles, ministry scoping, staff management, optimistic-concurrency sync, append-only finance ledger, per-IP rate limiting | Working, 78 tests |
 | `app/` local-first client: IndexedDB, sync engine, offline app shell, backup, resync | Working, 35 tests |
-| **Forgot password**: the login screen's "Forgot password?" link emails a one-time reset link (server/src/email.js, over a small dependency-free SMTP client this project writes itself — see "Forgot password" below), so an owner locked out of their own account isn't stuck forever (previously only an owner/admin could reset a *colleague's* password, under Settings → Staff & leaders). The reply never reveals whether an email actually has an account | Working, 16 tests |
+| **Forgot password**: the login screen's "Forgot password?" link emails a one-time reset link (server/src/email.js, via Brevo's transactional email API — see "Forgot password" below), so an owner locked out of their own account isn't stuck forever (previously only an owner/admin could reset a *colleague's* password, under Settings → Staff & leaders). The reply never reveals whether an email actually has an account | Working, 16 tests |
 | **Online giving (Paystack)**: a public, unauthenticated giving page (`app/give.html`) per church — members give by MTN MoMo/Telecel Cash/AirtelTigo or card, no login or app install needed. Each church connects its own Paystack account under Settings → "Online giving" (its own secret/public key pair, stored server-side only — never synced to a device); a confirmed payment posts straight into the same append-only `transactions` ledger everything else uses. See "Online giving (Paystack)" below | Working, 8 tests |
 | **WhatsApp (broadcast + check-in)**: each church connects its own WhatsApp Business API access under Settings → "WhatsApp" (a phone number ID + access token, from Meta directly or through a BSP such as Arkesel — stored server-side only, never synced to a device); owner/admin/secretary can then send a posted Notice out as a WhatsApp broadcast too, to the whole church or specific ministries, and a member can check themselves into today's whole-church attendance by replying "IN" (or "HERE"/"PRESENT"/"CHECK IN") to the church's WhatsApp number. See "WhatsApp (broadcast + check-in)" below | Working, 11 tests |
 | **QR self-check-in**: Settings → "QR check-in" shows a QR code (and copyable link) for `app/checkin.html?t=<tenantId>` — no third-party account needed at all. A member scans it with their own phone's camera, types the phone number on their member record, and is marked present on today's whole-church attendance the same way a WhatsApp "IN" reply is; idempotent, and a phone that doesn't match anyone is told to see the welcome desk rather than shown who else is a member. The QR code itself is generated entirely client-side by a small vendored encoder (`app/js/vendor/qrcode.js`) — no npm package, since the client has no build step. See "QR self-check-in" below | Working, 5 tests |
@@ -70,21 +70,22 @@ Open the app, choose "Register a new church", and go. To sign in to the platform
 
 The login screen's "Forgot password?" link (and the `/?resetToken=…` page it eventually leads to) emails a one-time reset link — until this existed, only an owner/admin could reset a colleague's password (Settings → Staff & leaders), which left an owner with no way back into their own account if *they* forgot it. The reply to a reset request is identical whether or not the email actually has an account, and never reveals which (`server/src/app.js`) — the same reasoning as the SMS/QR-check-in rate limiting below: nothing about the response should help someone probe who has an account here.
 
-**How it's sent.** `server/src/email.js` sends over plain SMTP via `server/src/smtp.js` — a small SMTP client this project writes and tests itself (see `server/test/smtp.test.js`, which runs it against a real local TLS socket), rather than an npm package or one of the REST-API providers (Resend, Brevo, SendGrid, …) the rest of this app's integrations use. Every one of those REST providers requires a verified custom domain before they'll send to an arbitrary recipient — a real blocker before a domain is bought — whereas SMTP works with a mailbox you already have.
+**How it's sent.** `server/src/email.js` posts to Brevo's transactional email HTTP API (`api.brevo.com`), over plain HTTPS — not SMTP. It was originally SMTP, via a small dependency-free client this project wrote itself, but Railway (and most PaaS hosts) blocks outbound SMTP ports (25/465/587) on every plan except its paid Pro tier, so that approach silently failed on a Free/Trial/Hobby Railway service: the connection attempt to Gmail never got anywhere. Brevo's API works over the same HTTPS port everything else in this app already uses, so nothing blocks it, and — unlike Resend, SendGrid, or most other REST-API providers — it lets you verify a single sender *address* (no custom domain or DNS records) for its free tier, which is why it's the one used here.
 
-**Setup — a Gmail account works today, no domain needed:**
-1. Turn on 2-Step Verification on the Gmail account you want emails to come from (myaccount.google.com → Security).
-2. Create an **App Password** for it (myaccount.google.com → Security → 2-Step Verification → App passwords) — a 16-character code, separate from your real Gmail password.
-3. Set these on the server:
+**Setup — a Gmail (or any) address works today, no domain needed:**
+1. Create a free account at [brevo.com](https://www.brevo.com).
+2. Under **Senders, Domains & Dedicated IPs → Senders**, add the address you want emails to come from and verify it — Brevo emails that address a confirmation link/code, no DNS setup required.
+3. Under **SMTP & API → API Keys**, generate an API key.
+4. Set these on the server:
    ```bash
-   SMTP_USER=you@gmail.com
-   SMTP_PASS=the-16-character-app-password
+   BREVO_API_KEY=xkeysib-...
+   EMAIL_FROM=you@gmail.com                 # must be the address verified as a Brevo sender in step 2
    APP_URL=https://your-app-domain          # the hosted APP's URL, not the server's — this is what the emailed link points at
    EMAIL_FROM_NAME="The ChurchFlow"         # optional, this is the default
    ```
-   `SMTP_HOST`/`SMTP_PORT` default to Gmail's own server (`smtp.gmail.com:465`) — only set them if switching to a different mailbox or provider later (any SMTP-speaking one works, once a verified domain makes a REST provider like Brevo an option too). A personal Gmail account tops out around 500 recipients/day — plenty for a beta, but worth moving to a dedicated provider with its own domain before a large public launch.
+   Brevo's free tier caps out at 300 emails/day — plenty for a beta; a paid Brevo plan (or Railway's Pro tier plus the earlier SMTP approach) is worth revisiting before a large public launch.
 
-Leaving `SMTP_USER`/`SMTP_PASS` or `APP_URL` unset doesn't break anything — "forgot password" requests still succeed (same generic reply either way), they just log an error server-side instead of actually emailing a link, exactly like any other unconfigured integration in this app (SMS, Paystack, WhatsApp).
+Leaving `BREVO_API_KEY`/`EMAIL_FROM` or `APP_URL` unset doesn't break anything — "forgot password" requests still succeed (same generic reply either way), they just log an error server-side instead of actually emailing a link, exactly like any other unconfigured integration in this app (SMS, Paystack, WhatsApp).
 
 ## Architecture
 

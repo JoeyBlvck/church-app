@@ -13,7 +13,7 @@ ensureSuperAdmin(db, process.env.SUPER_ADMIN_EMAIL, process.env.SUPER_ADMIN_PASS
 // password-reset email (server/src/email.js) can link back to a page that actually exists. Leave
 // it unset and "forgot password" requests still succeed (never revealing whether an email has an
 // account either way — see the route's own note), they just log an error instead of emailing a
-// link, same as leaving SMTP_USER/SMTP_PASS unset does.
+// link, same as leaving BREVO_API_KEY/EMAIL_FROM unset does.
 const appUrl = process.env.APP_URL ?? '';
 if (!appUrl) console.warn('APP_URL is not set — "forgot password" emails will not be sent (see server/src/email.js).');
 const port = Number(process.env.PORT ?? 8787);

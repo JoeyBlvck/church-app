@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../src/db.js';
 import { createApp } from '../src/app.js';
 
-// sendPasswordResetEmailImpl stands in for real SMTP here (see server/src/email.js) — it just
+// sendPasswordResetEmailImpl stands in for a real Brevo send here (see server/src/email.js) — it just
 // records the last message this test's server tried to send, so a test can pull the one-time
 // token out of it exactly the way a real recipient would pull it out of their inbox.
 async function setup() {

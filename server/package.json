@@ -5,6 +5,6 @@
   "private": true,
   "scripts": {
     "start": "node --no-warnings src/index.js",
-    "test": "node --no-warnings --test test/sync.test.js test/hikvision.test.js test/hikvision-bridge.test.js test/sms.test.js test/paystack.test.js test/whatsapp.test.js test/checkin.test.js test/ratelimit.test.js test/admin.test.js test/smtp.test.js test/email.test.js test/password-reset.test.js"
+    "test": "node --no-warnings --test test/sync.test.js test/hikvision.test.js test/hikvision-bridge.test.js test/sms.test.js test/paystack.test.js test/whatsapp.test.js test/checkin.test.js test/ratelimit.test.js test/admin.test.js test/email.test.js test/password-reset.test.js"
   }
 }
