@@ -58,7 +58,7 @@ function renderLogin() {
     h('p', {}, h('button', { class: 'btn block' }, 'Sign in')));
   root.replaceChildren(h('div', { class: 'login-page' }, h('div', { class: 'card login-card' },
     h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
-      h('div', { class: 'wordmark' }, 'Church ', h('span', {}, 'Manager'))),
+      h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow'))),
     h('h1', {}, 'Platform admin'), h('p', { class: 'subtitle' }, 'Operator console — separate from every church’s own sign-in.'),
     f)));
 }
@@ -181,7 +181,7 @@ function renderConsole(tenants) {
 
   root.replaceChildren(h('div', { class: 'shell' },
     h('nav', {}, h('div', { class: 'brand' }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
-        h('h1', {}, 'Church ', h('span', {}, 'Manager'), h('small', {}, 'Platform admin'))),
+        h('h1', {}, 'The Church', h('span', {}, 'Flow'), h('small', {}, 'Platform admin'))),
       h('div', { class: 'navlinks' }, h('div', { class: 'nav-title' }, 'Console'), h('button', { class: 'on' }, h('span', { class: 'ico' }, icon('church')), h('span', {}, 'Churches'))),
       // Back to the regular church app — a separate page (its own login, own token), not another
       // tab in this console, so a plain navigation is all this needs. Grouped with Sign out below

@@ -18,7 +18,7 @@ async function api(method, path, body) {
 
 const shell = (...kids) => h('div', { class: 'login-page' }, h('div', { class: 'card login-card give-card' }, ...kids));
 const brand = () => h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
-  h('div', { class: 'wordmark' }, 'Church ', h('span', {}, 'Manager')));
+  h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
 
 function renderError(message) {
   root.replaceChildren(shell(brand(), h('h1', {}, "Check-in link not found"), h('p', { class: 'subtitle' }, message)));

@@ -417,7 +417,7 @@ function renderLogin() {
       passwordField('Password', { autocomplete: mode === 'login' ? 'current-password' : 'new-password', withStrength: mode === 'register' }), err,
       h('p', {}, h('button', { class: 'btn block' }, c.btn)));
     const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
-      h('div', { class: 'wordmark' }, 'Church ', h('span', {}, 'Manager')));
+      h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
     root.replaceChildren(h('div', { class: 'login-shell' },
       h('div', { class: 'login-aside' },
         h('div', { class: 'login-aside-body' },
