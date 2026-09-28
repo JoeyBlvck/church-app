@@ -1,10 +1,11 @@
-import { h, field, val, opts, byName, sum, money, today, fmtDate, download, toCsv, empty, attendanceCount, monthKey, signedAmount } from '../ui.js';
+import { h, field, val, opts, byName, sum, money, today, fmtDate, download, toCsv, empty, attendanceCount, monthKey, signedAmount, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { STATUSES } from './members.js';
 
 export async function reportsView({ repo, user, ministries, members, households }) {
   const canFinance = ['owner', 'admin', 'treasurer'].includes(user.role);
-  const [tx, att] = await Promise.all([canFinance ? repo.list('transactions') : [], user.role === 'treasurer' ? [] : repo.list('attendance')]);
+  const [tx, att, churchName, settingsList] = await Promise.all([canFinance ? repo.list('transactions') : [], user.role === 'treasurer' ? [] : repo.list('attendance'), repo.churchName(), repo.list('settings')]);
+  const cs = settingsList.find((s) => s.id === 'church') ?? {};
   const mName = Object.fromEntries(ministries.map((m) => [m.id, m.name]));
   const out = h('div');
   const year = today().slice(0, 4);
@@ -12,7 +13,7 @@ export async function reportsView({ repo, user, ministries, members, households 
   const statement = (memberId, y) => {
     const m = members.find((x) => x.id === memberId);
     const rows = tx.filter((t) => t.memberId === memberId && t.type !== 'expense' && t.date.startsWith(y)).sort((a, b) => a.date.localeCompare(b.date));
-    out.replaceChildren(h('div', { class: 'card receipt' }, h('h3', {}, `Giving statement ${y}`), h('p', {}, h('b', {}, m?.name), m?.phone ? ` · ${m.phone}` : ''),
+    out.replaceChildren(h('div', { class: 'card receipt' }, pdfHeader(churchName, cs, `Giving statement ${y}`, null, user.name), h('h3', { class: 'noprint' }, `Giving statement ${y}`), h('p', {}, h('b', {}, m?.name), m?.phone ? ` · ${m.phone}` : ''),
       rows.length ? h('table', {}, h('thead', {}, h('tr', {}, ['Date', 'Type', 'Method', 'Amount'].map((t) => h('th', {}, t)))), h('tbody', {}, rows.map((t) => h('tr', {}, h('td', {}, fmtDate(t.date), t.reverses ? ' (reversal)' : ''), h('td', {}, t.type), h('td', {}, t.method), h('td', {}, money(signedAmount(t)))))),
         h('tr', {}, h('td', { colspan: 3 }, h('b', {}, 'Total')), h('td', {}, h('b', {}, money(sum(rows, signedAmount)))))) : empty('No giving recorded for this year.'),
       h('p', { class: 'actions noprint' }, h('button', { class: 'btn', onclick: () => window.print() }, icon('print', { size: 15 }), 'Print / save as PDF'))));

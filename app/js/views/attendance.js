@@ -1,4 +1,4 @@
-import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, barChart, attendanceCount, bulkBar, sum } from '../ui.js';
+import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, barChart, attendanceCount, bulkBar, sum, download, toCsv, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { parseCSV } from '../csv.js';
 import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport } from '../importers.js';
@@ -19,7 +19,9 @@ let currentPage = 1;
 let expandedDates = new Set();
 
 export async function attendanceView({ repo, user, ministries, members, rerender, initialMinistryId = '' }) {
-  const recs = (await repo.list('attendance')).sort((a, b) => b.date.localeCompare(a.date));
+  const [recsRaw, churchName, settingsList] = await Promise.all([repo.list('attendance'), repo.churchName(), repo.list('settings')]);
+  const recs = recsRaw.sort((a, b) => b.date.localeCompare(a.date));
+  const cs = settingsList.find((s) => s.id === 'church') ?? {};
   const isLeader = user.role === 'leader';
   const mName = Object.fromEntries(ministries.map((m) => [m.id, m.name]));
   const roster = members.filter((m) => m.status !== 'inactive' && m.status !== 'deceased').sort(byName);
@@ -116,7 +118,7 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     toast(msg, presentIds.length ? 'ok' : 'err');
     rerender();
   } });
-  const uploadCard = h('div', { class: 'card' }, h('b', {}, 'Upload attendance spreadsheet'),
+  const uploadCard = h('div', { class: 'card noprint' }, h('b', {}, 'Upload attendance spreadsheet'),
     h('p', { class: 'hint' }, 'Either a plain "who was present" list for one date — one column of names or clock-in device IDs, with or without a header row — or your clock-in device\'s own exported record log, which is recognized automatically and brings its own dates (one attendance record per day it covers). The device log also registers anyone it recognizes who isn\'t a member yet; existing members are only ever matched, never duplicated.'),
     h('div', { class: 'row' }, field('Date', importDate, 'Only used for the plain "who was present" list — a device log carries its own dates.'),
       field('Spreadsheet', h('button', { type: 'button', class: 'btn ghost', onclick: () => importFile.click() }, icon('upload', { size: 15 }), 'Upload spreadsheet'))), importFile);
@@ -153,6 +155,21 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     const pageGroups = dateGroups.slice((currentPage - 1) * pageSize, currentPage * pageSize);
     const pageRows = pageGroups.flatMap(([, dayRecs]) => dayRecs);
 
+    // Export CSV / PDF — scoped to the current ministry filter but every matching record
+    // across every page, not just what's currently on screen (a report that silently dropped
+    // whatever page you weren't looking at would be worse than no export at all).
+    const scope = ministryFilter ? mName[ministryFilter] ?? 'Ministry' : 'Whole church';
+    const exportCsv = () => download(`attendance-${scope.toLowerCase().replace(/\s+/g, '-')}.csv`, toCsv([['date', 'service', 'for', 'total present', ...(ministryMemberIds ? [`${scope} present`] : [])],
+      ...rows.map((r) => [r.date, r.service, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church', attendanceCount(r),
+        ...(ministryMemberIds ? [(r.presentIds ?? []).filter((id) => ministryMemberIds.has(id)).length] : [])])]), 'text/csv');
+    const printHead = pdfHeader(churchName, cs, `Attendance report — ${scope}`,
+      h('div', {}, `${rows.length} record${rows.length === 1 ? '' : 's'}`), user.name);
+    const printTable = h('table', { class: 'print-table' },
+      h('thead', {}, h('tr', {}, ['Date', ...heads].map((t) => h('th', {}, t)))),
+      h('tbody', {}, rows.map((r) => h('tr', {},
+        h('td', {}, fmtDate(r.date)), h('td', {}, r.service), h('td', {}, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church'), h('td', {}, attendanceCount(r)),
+        ministryMemberIds && h('td', {}, (r.presentIds ?? []).filter((id) => ministryMemberIds.has(id)).length)))));
+
     const controls = h('div', { class: 'filters' },
       !isLeader && ministries.length > 0 && h('select', { onchange: (e) => { ministryFilter = e.target.value; currentPage = 1; drawTable(); } },
         h('option', { value: '' }, 'All ministries'), opts(ministries.slice().sort(byName).map((m) => [m.id, m.name]), ministryFilter)),
@@ -160,6 +177,8 @@ export async function attendanceView({ repo, user, ministries, members, rerender
         opts([['desc', 'Newest first'], ['asc', 'Oldest first']], sortDir)),
       h('select', { 'aria-label': 'Records per page', onchange: (e) => { pageSize = Number(e.target.value); currentPage = 1; drawTable(); } },
         opts(PAGE_SIZES.map((n) => [n, `${n} per page`]), pageSize)),
+      h('button', { type: 'button', class: 'btn ghost sm', onclick: () => window.print() }, icon('print', { size: 14 }), 'Export PDF'),
+      h('button', { type: 'button', class: 'btn ghost sm', onclick: exportCsv }, icon('download', { size: 14 }), 'Export CSV'),
       pageRows.length > 0 && h('label', { class: 'check' }, sel.headBox(), ' Select all on this page'));
 
     const dateFolds = pageGroups.map(([date, dayRecs]) => {
@@ -183,18 +202,18 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     // .filter(Boolean): unlike h()'s own children (which drop a bare `false`/`null`),
     // replaceChildren() is a native DOM method — it has no such filtering, and stringifies a
     // falsy non-node argument into a literal "false" text node instead of just omitting it.
-    tableCard.replaceChildren(...[
+    tableCard.replaceChildren(printHead, printTable, h('div', { class: 'noprint' }, ...[
       controls,
       rows.length && sel.bar,
       dateFolds.length ? h('div', {}, dateFolds) : empty(ministryFilter ? 'No attendance recorded for this ministry yet.' : 'No attendance recorded yet.'),
       pager,
-    ].filter(Boolean));
+    ].filter(Boolean)));
     sel.sync(pageRows.map((r) => r.id));
   };
   drawTable();
 
   return h('div', {}, h('div', { class: 'bar' }, h('h2', {}, 'Attendance'), h('button', { class: 'btn', onclick: () => takeForm() }, icon('plus', { size: 15 }), 'Take attendance')),
     uploadCard,
-    trend.length > 1 && h('div', { class: 'card' }, h('b', {}, 'Recent church-wide attendance'), barChart(trend)),
+    trend.length > 1 && h('div', { class: 'card noprint' }, h('b', {}, 'Recent church-wide attendance'), barChart(trend)),
     tableCard);
 }

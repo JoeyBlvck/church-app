@@ -1,7 +1,7 @@
 // Annual programme calendar: a short list of church-wide events (Harvest, Watch Night,
 // Annual Convention…), each optionally repeating every year on the same date. The
 // dashboard shows whichever of these fall within the next two weeks, with a countdown.
-import { h, field, val, opts, byName, modal, confirmDialog, toast, empty, fmtDate, nextOccurrence, daysUntil, dateKey, countdownLabel, bulkBar } from '../ui.js';
+import { h, field, val, opts, byName, modal, confirmDialog, toast, empty, fmtDate, nextOccurrence, daysUntil, dateKey, countdownLabel, bulkBar, download, toCsv, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 
 const REG_STATUSES = ['registered', 'attended', 'cancelled'];
@@ -10,8 +10,8 @@ const REG_PILL_CLASS = { attended: 'good', cancelled: 'bad' };
 
 export async function programmesView({ repo, user, members, rerender }) {
   const canManage = ['owner', 'admin', 'secretary'].includes(user.role);
-  const raw = await repo.list('programmes');
-  const regs = await repo.list('registrations');
+  const [raw, regs, churchName, settingsList] = await Promise.all([repo.list('programmes'), repo.list('registrations'), repo.churchName(), repo.list('settings')]);
+  const cs = settingsList.find((s) => s.id === 'church') ?? {};
   const withOcc = raw.map((p) => { const occ = nextOccurrence(p.date, p.recurring); return { ...p, occ, days: daysUntil(occ) }; });
   const upcoming = withOcc.filter((p) => p.days >= 0).sort((a, b) => a.days - b.days);
   const past = withOcc.filter((p) => p.days < 0).sort((a, b) => b.occ - a.occ);
@@ -171,12 +171,29 @@ export async function programmesView({ repo, user, members, rerender }) {
   selUpcoming?.sync(upcoming.map((p) => p.id));
   selPast?.sync(past.map((p) => p.id));
 
+  // Export CSV / PDF — the whole calendar (upcoming and past), each programme's own
+  // registration counts included, same as the on-screen "N registered" button per row.
+  const exportRows = [...upcoming, ...past].map((p) => ({ p, c: regCounts(p.id) }));
+  const exportCsv = () => download('programme-calendar.csv', toCsv([
+    ['programme', 'date', 'location', 'recurring', 'registered', 'attended', 'cancelled', 'total'],
+    ...exportRows.map(({ p, c }) => [p.name, dateKey(p.occ), p.location ?? '', p.recurring ? 'yes' : 'no', c.registered, c.attended, c.cancelled, c.total])]), 'text/csv');
+  const printHead = pdfHeader(churchName, cs, 'Programme calendar', h('div', {}, `${raw.length} programme${raw.length === 1 ? '' : 's'}`), user.name);
+  const printSection = (label, list) => list.length ? h('div', {}, h('h4', {}, label),
+    h('table', { class: 'print-table' }, h('thead', {}, h('tr', {}, ['Programme', 'Date', 'Location', 'Registered', 'Attended', 'Cancelled'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, list.map((p) => { const c = regCounts(p.id); return h('tr', {},
+        h('td', {}, p.name), h('td', {}, fmtDate(dateKey(p.occ))), h('td', {}, p.location ?? ''), h('td', {}, c.registered), h('td', {}, c.attended), h('td', {}, c.cancelled)); })))) : null;
+
   return h('div', {},
-    h('div', { class: 'bar' }, h('h2', {}, 'Programme calendar'), canManage && h('button', { class: 'btn', onclick: () => editForm() }, icon('plus', { size: 15 }), 'Add programme')),
-    h('p', { class: 'hint' }, "Your church's yearly calendar of programmes. Whichever one is coming up within the next two weeks also shows on the Home dashboard, counting down to the day."),
-    h('div', { class: 'card' }, selUpcoming?.bar, upcoming.length ? h('table', {}, h('thead', {}, h('tr', {}, selUpcoming && h('th', { class: 'sel-col' }, selUpcoming.headBox()), ['Programme', 'Date', '', '', 'Registrations'].map((t) => h('th', {}, t)))),
+    printHead, h('div', { class: 'print-only' }, printSection('Upcoming', upcoming), printSection('Past', past)),
+    h('div', { class: 'bar noprint' }, h('h2', {}, 'Programme calendar'),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn ghost', onclick: () => window.print() }, icon('print', { size: 15 }), 'Export PDF'),
+        h('button', { class: 'btn ghost', onclick: exportCsv }, icon('download', { size: 15 }), 'Export CSV'),
+        canManage && h('button', { class: 'btn', onclick: () => editForm() }, icon('plus', { size: 15 }), 'Add programme'))),
+    h('p', { class: 'hint noprint' }, "Your church's yearly calendar of programmes. Whichever one is coming up within the next two weeks also shows on the Home dashboard, counting down to the day."),
+    h('div', { class: 'card noprint' }, selUpcoming?.bar, upcoming.length ? h('table', {}, h('thead', {}, h('tr', {}, selUpcoming && h('th', { class: 'sel-col' }, selUpcoming.headBox()), ['Programme', 'Date', '', '', 'Registrations'].map((t) => h('th', {}, t)))),
       h('tbody', {}, upcoming.map((p) => row(p, selUpcoming)))) : empty(canManage ? "No programmes yet — add your Annual Convention, Harvest, Watch Night service…" : 'No programmes scheduled yet.')),
-    past.length > 0 && h('div', { class: 'card' }, h('b', {}, 'Past programmes'), selPast?.bar,
+    past.length > 0 && h('div', { class: 'card noprint' }, h('b', {}, 'Past programmes'), selPast?.bar,
       h('table', {}, selPast && h('thead', {}, h('tr', {}, h('th', { class: 'sel-col' }, selPast.headBox()), h('th'), h('th'), h('th'), h('th'), h('th'))),
         h('tbody', {}, past.map((p) => row(p, selPast))))));
 }

@@ -493,8 +493,11 @@ ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7
 .pdf-header-brand { display:flex; align-items:center; gap:12px; }
 .pdf-header-brand img, .pdf-header-brand svg { width:40px; height:40px; object-fit:contain; color:var(--primary); }
 .pdf-header-name { font-size:19px; font-weight:800; color:var(--primary); letter-spacing:-.01em; }
+.pdf-header-location { font-size:12px; color:var(--mute); margin-top:1px; }
 .pdf-header-sub { font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--accent-hover); margin-top:2px; }
 .pdf-header-meta { font-size:12px; color:var(--mute); text-align:right; }
+.pdf-header-right { text-align:right; }
+.pdf-header-generated { font-size:11px; color:var(--mute); margin-top:2px; }
 
 /* ---------- one member's own printable card (Members → click a member → Print card) — same
    invisible-until-printed trick and teal/gold palette as the masthead above, just scoped to a
@@ -725,7 +728,7 @@ ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7
   #toasts { bottom:82px; }
 }
 @media print {
-  nav, .noprint, .bar, .filters, .backdrop > .modal .modal-head, #toasts { display:none !important; }
+  nav, .noprint, .bar, .filters, .tabs, .backdrop > .modal .modal-head, #toasts { display:none !important; }
   body { background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .shell { display:block; } .card { border:0; box-shadow:none; }
   /* Hiding nav/main alone left .shell's own min-height:100vh behind — an empty first page
@@ -743,9 +746,10 @@ ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7
   table th { background:var(--pill) !important; color:var(--primary) !important; }
   .modal { box-shadow:none; max-width:none; animation:none; }
   /* One member's own "Print card" (see .print-only above): the modal head's title is hidden
-     (rule above), so .member-card-head is this printout's real title instead. */
+     (rule above), so .member-card-head is this printout's real title instead. Its own .pdf-header
+     (nested inside .basic-only/.full-only) already draws the separating rule under the church
+     logo/name row, so .member-card-head itself only needs spacing, not a second border. */
   .print-only { display:block; }
-  .member-card-head { border-bottom:3px solid var(--primary); }
   .basic-only { display:block; }
   body.printing-full .basic-only { display:none; }
   body.printing-full .full-only { display:block; }

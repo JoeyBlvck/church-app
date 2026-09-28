@@ -1,4 +1,4 @@
-import { h, field, val, opts, byName, sum, money, today, fmtDate, monthKey, modal, confirmDialog, toast, download, toCsv, empty, barChart, signedAmount } from '../ui.js';
+import { h, field, val, opts, byName, sum, money, today, fmtDate, monthKey, modal, confirmDialog, toast, download, toCsv, empty, barChart, signedAmount, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 
 export const TYPES = ['tithe', 'offering', 'welfare', 'pledge payment', 'donation', 'expense'];
@@ -29,8 +29,9 @@ export async function financeView({ repo, user, ministries, members, rerender, i
   // their own ministry's transactions below, but never sees the accounts/funds list itself, same
   // as leaders never see pledges (see permissions.js).
   const canManageFinance = ['owner', 'admin', 'treasurer'].includes(user.role);
-  const [tx, pledges, accounts, funds] = await Promise.all([repo.list('transactions'), isLeader ? [] : repo.list('pledges'),
-    canManageFinance ? repo.list('accounts') : [], canManageFinance ? repo.list('funds') : []]);
+  const [tx, pledges, accounts, funds, churchName, settingsList] = await Promise.all([repo.list('transactions'), isLeader ? [] : repo.list('pledges'),
+    canManageFinance ? repo.list('accounts') : [], canManageFinance ? repo.list('funds') : [], repo.churchName(), repo.list('settings')]);
+  const cs = settingsList.find((s) => s.id === 'church') ?? {};
   tx.sort((a, b) => b.date.localeCompare(a.date) || (b.at ?? 0) - (a.at ?? 0));
   const mName = Object.fromEntries(ministries.map((m) => [m.id, m.name]));
   const memName = Object.fromEntries(members.map((m) => [m.id, m.name]));
@@ -99,7 +100,7 @@ export async function financeView({ repo, user, ministries, members, rerender, i
   };
 
   const receipt = (t) => {
-    const m = modal('Receipt', h('div', { class: 'receipt' }, h('h3', {}, 'Receipt'), h('p', {}, `Date: ${fmtDate(t.date)}`), h('p', {}, `Received from: ${memName[t.memberId] ?? 'Anonymous'}`),
+    const m = modal('Receipt', h('div', { class: 'receipt' }, pdfHeader(churchName, cs, 'Receipt', null, user.name), h('h3', { class: 'noprint' }, 'Receipt'), h('p', {}, `Date: ${fmtDate(t.date)}`), h('p', {}, `Received from: ${memName[t.memberId] ?? 'Anonymous'}`),
       h('p', {}, `For: ${t.type}${t.ministryId ? ' · ' + mName[t.ministryId] : ''}`), h('p', {}, `Method: ${t.method ?? ''}${t.note ? ' · ' + t.note : ''}`), h('p', { class: 'big' }, money(t.amount)),
       h('p', { class: 'hint' }, `Recorded by ${t.recordedBy ?? ''}`), h('p', { class: 'actions noprint' }, h('button', { class: 'btn', onclick: () => { document.body.classList.add('printing-modal'); window.print(); document.body.classList.remove('printing-modal'); } }, icon('print', { size: 15 }), 'Print'))));
   };
@@ -188,7 +189,21 @@ export async function financeView({ repo, user, ministries, members, rerender, i
     const chart = months.map((mo) => ({ label: mo.slice(5), value: sum(tx.filter((t) => monthKey(t.date) === mo), incomeAmt) }));
     const exportCsv = () => download(`finance-${state.from}_${state.to}.csv`, toCsv([['date', 'type', 'amount', 'method', 'member', 'ministry', 'note', 'recorded by', 'reverses', 'corrects'],
       ...rows.map((t) => [t.date, t.type, t.amount, t.method, memName[t.memberId], mName[t.ministryId], t.note, t.recordedBy, t.reverses ?? '', t.correctsId ?? ''])]), 'text/csv');
-    body.replaceChildren(
+    // Export PDF — same window.print() masthead+table trick as Members' own "Export PDF"
+    // (see pdfHeader/print-table in ui.js/style.css): scoped to whatever's currently filtered,
+    // so picking one ministry above and printing gives that ministry's own finance report,
+    // and leaving every filter at its default gives the whole church's.
+    const scope = state.ministry ? mName[state.ministry] : 'Church-wide';
+    const printHead = pdfHeader(churchName, cs, `Finance report — ${scope}`,
+      h('div', {}, h('div', {}, `${fmtDate(state.from)} – ${fmtDate(state.to)}`), h('div', {}, `${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}`)), user.name);
+    const printTable = h('table', { class: 'print-table' },
+      h('thead', {}, h('tr', {}, ['Date', 'Type', 'Amount', 'Method', 'Member', 'Ministry'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, rows.map((t) => h('tr', {},
+        h('td', {}, fmtDate(t.date)), h('td', {}, t.type), h('td', {}, (t.type === 'expense' ? '−' : '') + money(t.amount)),
+        h('td', {}, t.method), h('td', {}, memName[t.memberId] ?? ''), h('td', {}, mName[t.ministryId] ?? 'Church-wide'))),
+        h('tr', {}, h('td', { colspan: 2 }, h('b', {}, 'Totals')), h('td', {}, h('b', {}, money(inc - exp))),
+          h('td', { colspan: 3 }, `Income ${money(inc)} · Expenses ${money(exp)}`))));
+    body.replaceChildren(printHead, printTable, h('div', { class: 'noprint' },
       h('div', { class: 'grid' }, [['Income', inc], ['Expenses', exp], ['Net', inc - exp]].map(([l, n]) => h('div', { class: 'card stat' }, h('b', { class: n < 0 ? 'neg' : '' }, money(n)), h('span', {}, `${l} · selected period`)))),
       h('div', { class: 'card' }, h('b', {}, 'Income, last 6 months'), barChart(chart, { format: (v) => (v >= 1000 ? Math.round(v / 1000) + 'k' : Math.round(v)) })),
       h('div', { class: 'card' }, h('div', { class: 'filters' },
@@ -196,6 +211,7 @@ export async function financeView({ repo, user, ministries, members, rerender, i
         h('select', { onchange: (e) => { state.type = e.target.value; drawTx(); } }, h('option', { value: '' }, 'All types'), opts(TYPES, state.type)),
         !isLeader && ministries.length > 0 && h('select', { onchange: (e) => { state.ministry = e.target.value; drawTx(); } }, h('option', { value: '' }, 'All ministries'), opts(ministries.slice().sort(byName).map((m) => [m.id, m.name]), state.ministry)),
         h('input', { type: 'search', placeholder: 'Search member / note', value: state.q, oninput: (e) => { state.q = e.target.value.toLowerCase(); drawTx(); } }),
+        h('button', { class: 'btn ghost sm', onclick: () => window.print() }, icon('print', { size: 14 }), 'Export PDF'),
         h('button', { class: 'btn ghost sm', onclick: exportCsv }, icon('download', { size: 14 }), 'Export CSV')),
         rows.length ? h('table', {}, h('thead', {}, h('tr', {}, ['Date', 'Type', 'Amount', 'Method', 'Member', 'Ministry'].map((t) => h('th', {}, t)))),
           h('tbody', {}, rows.map((t) => { const settled = t.reverses || reversalOf[t.id];
@@ -203,7 +219,7 @@ export async function financeView({ repo, user, ministries, members, rerender, i
               h('td', {}, fmtDate(t.date)), h('td', {}, h('span', { class: `pill ${t.type === 'expense' ? 'bad' : ''}` }, t.type), t.reverses ? h('span', { class: 'pill', title: 'Reversal' }, 'reversal') : reversalOf[t.id] ? h('span', { class: 'pill bad', title: 'A reversal was posted for this entry' }, 'voided') : null),
               h('td', { class: (t.type === 'expense' ? 'neg' : '') + (settled ? ' voided' : '') }, (t.type === 'expense' ? '−' : '') + money(t.amount)),
               h('td', {}, t.method, (accName[t.accountId] || fundName[t.fundId]) && h('div', { class: 'hint' }, [accName[t.accountId], fundName[t.fundId]].filter(Boolean).join(' · '))),
-              h('td', {}, memName[t.memberId] ?? ''), h('td', {}, mName[t.ministryId] ?? 'Church-wide')); }))) : empty('Nothing recorded for these filters.')));
+              h('td', {}, memName[t.memberId] ?? ''), h('td', {}, mName[t.ministryId] ?? 'Church-wide')); }))) : empty('Nothing recorded for these filters.'))));
   };
 
   const drawPledges = () => {

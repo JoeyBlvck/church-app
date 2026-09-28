@@ -1,4 +1,4 @@
-import { h, field, val, opts, byName, sum, money, today, fmtDate, ageFromBirthday, modal, menu, confirmDialog, toast, download, toCsv, empty, attendanceCount, avatar, photoPicker, bulkBar } from '../ui.js';
+import { h, field, val, opts, byName, sum, money, today, fmtDate, ageFromBirthday, modal, menu, confirmDialog, toast, download, toCsv, empty, attendanceCount, avatar, photoPicker, bulkBar, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { parseCSV } from '../csv.js';
 import { rowsToMemberRecords, planMemberImport } from '../importers.js';
@@ -160,8 +160,8 @@ export async function membersView(ctx) {
     const attended = att.filter((a) => a.presentIds?.includes(m.id)).sort((a, b) => b.date.localeCompare(a.date));
     const family = m.householdId ? list.filter((x) => x.householdId === m.householdId && x.id !== m.id) : [];
     const cardHead = h('div', { class: 'print-only member-card-head' },
-      h('div', { class: 'pdf-header-sub basic-only' }, `${churchName || 'Church'} · Member Card`),
-      h('div', { class: 'pdf-header-sub full-only' }, `${churchName || 'Church'} · Member — Full Details`),
+      h('div', { class: 'basic-only' }, pdfHeader(churchName, cs, 'Member Card', null, user.name)),
+      h('div', { class: 'full-only' }, pdfHeader(churchName, cs, 'Member — Full Details', null, user.name)),
       h('div', { class: 'member-card-who' }, avatar(m.name, m.photo, 56),
         h('div', {}, h('h3', {}, m.name), statusPill(m.status))));
     // The "Full details" giving report is exactly three sections — Welfare, Tithe, Donation —
@@ -347,7 +347,7 @@ export async function membersView(ctx) {
       && (!state.status || m.status === state.status) && (!state.ministry || m.ministryIds?.includes(state.ministry)))
       .sort(SORTS[state.sort].cmp);
     count.textContent = `${rows.length} of ${list.length}`;
-    pdfMeta.textContent = `${rows.length} member${rows.length === 1 ? '' : 's'} · generated ${fmtDate(today())}`;
+    pdfMeta.textContent = `${rows.length} member${rows.length === 1 ? '' : 's'}`;
     listEl.replaceChildren(...rows.map((m) => h('li', { class: `people-row click ${m.id === selectedMemberId ? 'selected' : ''}`, onclick: () => selectMember(m) },
       sel && h('span', { class: 'sel-col noprint', onclick: (e) => e.stopPropagation() }, sel.box(m.id)),
       avatar(m.name, m.photo, 34),
@@ -407,10 +407,7 @@ export async function membersView(ctx) {
   // print stylesheet, so these just need to exist in the DOM; invisible until window.print()
   // runs, at which point .people-shell (marked .noprint below) disappears and these take its
   // place instead.
-  const pdfHeader = h('div', { class: 'pdf-header' },
-    h('div', { class: 'pdf-header-brand' }, cs.logo ? h('img', { src: cs.logo, alt: '' }) : icon('church', { size: 28 }),
-      h('div', {}, h('div', { class: 'pdf-header-name' }, churchName || 'Church'), h('div', { class: 'pdf-header-sub' }, 'Member Directory'))),
-    pdfMeta);
+  const directoryHeader = pdfHeader(churchName, cs, 'Member Directory', pdfMeta, user.name);
   const printTable = h('table', { class: 'print-table' },
     h('thead', {}, h('tr', {}, ['Name', 'Phone', 'Status', 'Household', 'Ministries'].map((t) => h('th', {}, t)))), printBody);
 
@@ -440,7 +437,7 @@ export async function membersView(ctx) {
     h('button', { class: 'btn ghost', onclick: () => window.print() }, icon('print', { size: 15 }), 'Export PDF'),
     canWrite && h('button', { class: 'btn ghost', onclick: () => fileInput.click() }, icon('upload', { size: 15 }), 'Upload member spreadsheet'), fileInput,
     canWrite && h('button', { class: 'btn', onclick: () => openForm() }, icon('plus', { size: 15 }), 'Add member'))),
-    pdfHeader, printTable, shell);
+    directoryHeader, printTable, shell);
 
   const restoreSelected = selectedMemberId && list.find((m) => m.id === selectedMemberId);
   if (restoreSelected) selectMember(restoreSelected, { keepTab: true, restoring: true });

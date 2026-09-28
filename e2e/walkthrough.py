@@ -15,7 +15,12 @@ with sync_playwright() as p:
     modal = lambda: pg.locator('.modal')
     pg.goto('http://localhost:5173'); pg.click('text=Register a new church')
     pg.fill('[name=church]','Grace Chapel'); pg.fill('[name=name]','Pastor Joel Mensah'); pg.fill('[name=email]',EM); pg.fill('[name=password]','password123')
-    pg.click('button:has-text("Create church account")'); pg.wait_for_selector('text=Welcome, Pastor'); pg.wait_for_selector('text=Getting started'); shot(pg,'01_home_empty')
+    # Registering now signs you back out to the login screen instead of straight into the
+    # dashboard (so a fresh signup can't be mistaken for an already-logged-in session) — sign in
+    # with the same credentials to continue.
+    pg.click('button:has-text("Create church account")'); pg.wait_for_selector('button:has-text("Sign in")')
+    pg.fill('[name=email]',EM); pg.fill('[name=password]','password123'); pg.click('button:has-text("Sign in")')
+    pg.wait_for_selector('text=Welcome, Pastor'); pg.wait_for_selector('text=Getting started'); shot(pg,'01_home_empty')
     # ministries
     nav('Ministries','Ministries')
     for n in ['Youth','Choir']:
