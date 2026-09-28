@@ -1,4 +1,4 @@
-# The ChurchFlow (v0.17.0 — renamed from Church Manager; added a Mac/Windows desktop app (see "Desktop app" below) and per-IP rate limiting on every public endpoint (see "Server hardening"); QR self-check-in landed in v0.16, WhatsApp broadcast + check-in-by-reply in v0.15, online giving via Paystack in v0.14)
+# The ChurchFlow (v0.18.0 — added "Forgot password" email reset (see "Forgot password" below); v0.17 added a Mac/Windows desktop app (see "Desktop app" below) and per-IP rate limiting on every public endpoint (see "Server hardening"); QR self-check-in landed in v0.16, WhatsApp broadcast + check-in-by-reply in v0.15, online giving via Paystack in v0.14)
 
 A multi-tenant, local-first church management system: works fully offline on each device and syncs when a connection is available. Built to be sold to many churches.
 
@@ -6,8 +6,9 @@ A multi-tenant, local-first church management system: works fully offline on eac
 
 | Piece | Status |
 |---|---|
-| `server/` sync + auth API: multi-tenant, roles, ministry scoping, staff management, optimistic-concurrency sync, append-only finance ledger, per-IP rate limiting | Working, 62 tests |
+| `server/` sync + auth API: multi-tenant, roles, ministry scoping, staff management, optimistic-concurrency sync, append-only finance ledger, per-IP rate limiting | Working, 78 tests |
 | `app/` local-first client: IndexedDB, sync engine, offline app shell, backup, resync | Working, 35 tests |
+| **Forgot password**: the login screen's "Forgot password?" link emails a one-time reset link (server/src/email.js, over a small dependency-free SMTP client this project writes itself — see "Forgot password" below), so an owner locked out of their own account isn't stuck forever (previously only an owner/admin could reset a *colleague's* password, under Settings → Staff & leaders). The reply never reveals whether an email actually has an account | Working, 16 tests |
 | **Online giving (Paystack)**: a public, unauthenticated giving page (`app/give.html`) per church — members give by MTN MoMo/Telecel Cash/AirtelTigo or card, no login or app install needed. Each church connects its own Paystack account under Settings → "Online giving" (its own secret/public key pair, stored server-side only — never synced to a device); a confirmed payment posts straight into the same append-only `transactions` ledger everything else uses. See "Online giving (Paystack)" below | Working, 8 tests |
 | **WhatsApp (broadcast + check-in)**: each church connects its own WhatsApp Business API access under Settings → "WhatsApp" (a phone number ID + access token, from Meta directly or through a BSP such as Arkesel — stored server-side only, never synced to a device); owner/admin/secretary can then send a posted Notice out as a WhatsApp broadcast too, to the whole church or specific ministries, and a member can check themselves into today's whole-church attendance by replying "IN" (or "HERE"/"PRESENT"/"CHECK IN") to the church's WhatsApp number. See "WhatsApp (broadcast + check-in)" below | Working, 11 tests |
 | **QR self-check-in**: Settings → "QR check-in" shows a QR code (and copyable link) for `app/checkin.html?t=<tenantId>` — no third-party account needed at all. A member scans it with their own phone's camera, types the phone number on their member record, and is marked present on today's whole-church attendance the same way a WhatsApp "IN" reply is; idempotent, and a phone that doesn't match anyone is told to see the welcome desk rather than shown who else is a member. The QR code itself is generated entirely client-side by a small vendored encoder (`app/js/vendor/qrcode.js`) — no npm package, since the client has no build step. See "QR self-check-in" below | Working, 5 tests |
@@ -64,6 +65,26 @@ Open the app, choose "Register a new church", and go. To sign in to the platform
   ```
   Set these before `npm start`/deploying the server. Leaving both email and password unset simply skips creating the account (fine for a dev server you're not using the console against); changing `SUPER_ADMIN_PASSWORD` and restarting the server rotates the password on the existing account rather than creating a second one.
 - **Deliberately narrow scope.** Signed in at `admin.html`, you see every church in one searchable table (name, plan, member/staff counts, SMS status, created date) and can edit, per church: its **name, plan/subscription status, logo, motto, location, district, region**, and its **Arkesel SMS API key/sender ID**. That's the whole scope, on purpose — the console has no access to any church's members, finance, attendance, staff accounts or notices; that data stays exactly as private to each church as it is today. An edit you make here reaches that church's own devices the normal way, through their own next sync.
+
+## Forgot password
+
+The login screen's "Forgot password?" link (and the `/?resetToken=…` page it eventually leads to) emails a one-time reset link — until this existed, only an owner/admin could reset a colleague's password (Settings → Staff & leaders), which left an owner with no way back into their own account if *they* forgot it. The reply to a reset request is identical whether or not the email actually has an account, and never reveals which (`server/src/app.js`) — the same reasoning as the SMS/QR-check-in rate limiting below: nothing about the response should help someone probe who has an account here.
+
+**How it's sent.** `server/src/email.js` sends over plain SMTP via `server/src/smtp.js` — a small SMTP client this project writes and tests itself (see `server/test/smtp.test.js`, which runs it against a real local TLS socket), rather than an npm package or one of the REST-API providers (Resend, Brevo, SendGrid, …) the rest of this app's integrations use. Every one of those REST providers requires a verified custom domain before they'll send to an arbitrary recipient — a real blocker before a domain is bought — whereas SMTP works with a mailbox you already have.
+
+**Setup — a Gmail account works today, no domain needed:**
+1. Turn on 2-Step Verification on the Gmail account you want emails to come from (myaccount.google.com → Security).
+2. Create an **App Password** for it (myaccount.google.com → Security → 2-Step Verification → App passwords) — a 16-character code, separate from your real Gmail password.
+3. Set these on the server:
+   ```bash
+   SMTP_USER=you@gmail.com
+   SMTP_PASS=the-16-character-app-password
+   APP_URL=https://your-app-domain          # the hosted APP's URL, not the server's — this is what the emailed link points at
+   EMAIL_FROM_NAME="The ChurchFlow"         # optional, this is the default
+   ```
+   `SMTP_HOST`/`SMTP_PORT` default to Gmail's own server (`smtp.gmail.com:465`) — only set them if switching to a different mailbox or provider later (any SMTP-speaking one works, once a verified domain makes a REST provider like Brevo an option too). A personal Gmail account tops out around 500 recipients/day — plenty for a beta, but worth moving to a dedicated provider with its own domain before a large public launch.
+
+Leaving `SMTP_USER`/`SMTP_PASS` or `APP_URL` unset doesn't break anything — "forgot password" requests still succeed (same generic reply either way), they just log an error server-side instead of actually emailing a link, exactly like any other unconfigured integration in this app (SMS, Paystack, WhatsApp).
 
 ## Architecture
 
@@ -186,7 +207,7 @@ Render's paid disk tier includes automatic daily snapshots (7-day retention) as 
 2. ~~Finance entries can be edited or deleted.~~ **Fixed in v0.5:** the ledger is append-only for every role, including owner/admin — a posted transaction can never be mutated (`server/src/permissions.js` + `app.js`). Corrections and reversals post new entries linked by `reverses`/`correctsId`; still worth adding a dedicated audit-log view and month-end locking later.
 3. **Local data is not encrypted at rest**; the login token lives on the device. Add device PIN/biometrics and encrypted storage in the phone/desktop builds.
 3a. **Desktop builds are unsigned.** Fine for a pilot church testing on their own machine (with one click through the OS's "unknown developer" warning), but a real Apple Developer certificate (~$99/year) and a Windows code-signing certificate are needed before distributing this more widely, so the warning goes away.
-4. **SQLite → Postgres** for the hosted server, plus HTTPS (handled automatically by Render), password reset by email, email verification, and backups beyond Render's built-in daily disk snapshots. ~~Rate limiting.~~ **Fixed:** see "Server hardening" above.
+4. **SQLite → Postgres** for the hosted server, plus HTTPS (handled automatically by Render), email verification, and backups beyond Render's built-in daily disk snapshots. ~~Rate limiting.~~ **Fixed:** see "Server hardening" above. ~~Password reset by email.~~ **Fixed:** see "Forgot password" above.
 5. **Tokens last 30 days.** Deactivating a staff account locks them out on their next request, but their device keeps its local copy until signed out (Settings → Re-download data refreshes what a user may see).
 6. **Data protection.** Member data is personal data and giving records can reveal religious belief: consent, privacy policy, Data Protection Commission registration (Ghana Act 843) and a data-processing agreement with each church.
 7. **Rejected offline edits due to a permission change** (e.g. a leader editing outside their ministry) are reported by a warning; the local copy is corrected by "Re-download data". (A version conflict — including an attempted edit of a posted finance entry — now self-heals immediately instead, no re-download needed.)

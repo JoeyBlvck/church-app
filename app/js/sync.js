@@ -43,6 +43,13 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
     listStaff: () => http('GET', '/users'),
     updateStaff: (input) => http('POST', '/users/update', input),
     changePassword: (current, next) => http('POST', '/auth/change-password', { current, next }),
+    // "Forgot password" (renderLogin's own link, and the reset screen /?resetToken=... lands
+    // on): both unauthenticated — there's no session yet at this point — so they ride the same
+    // http() helper as everything else, just without a token to send. requestPasswordReset
+    // always resolves the same way regardless of whether the email has an account; the server
+    // never says which (see its own note on why in server/src/app.js).
+    requestPasswordReset: (email) => http('POST', '/auth/request-password-reset', { email }),
+    resetPassword: (token, password) => http('POST', '/auth/reset-password', { token, password }),
     // photo is optional: omit it to leave whatever's on file untouched, or pass a compressed
     // data URI (see ui.js compressImage) or null to set/remove it.
     async updateProfile(name, email, photo) {

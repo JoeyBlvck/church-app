@@ -1,7 +1,7 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
 import { API_URL } from './config.js';
-import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField } from './ui.js';
+import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal } from './ui.js';
 import { icon } from './icons.js';
 import { dashboardView } from './views/dashboard.js';
 import { membersView } from './views/members.js';
@@ -13,7 +13,7 @@ import { staffView, announcementsView } from './views/people.js';
 import { programmesView } from './views/programmes.js';
 import { settingsView } from './views/settings.js';
 
-console.log('The ChurchFlow build: v0.17.0 (desktop app + rebrand)'); // sanity check: confirms which build the browser actually loaded
+console.log('The ChurchFlow build: v0.18.0 (forgot password)'); // sanity check: confirms which build the browser actually loaded
 
 const repo = createRepo(idbStore(), { baseUrl: API_URL });
 const root = document.getElementById('app');
@@ -284,7 +284,13 @@ function notificationBell(items, go, rerender) {
 async function render() {
   const id = ++renderId;
   const user = await repo.user();
-  if (!user) return renderLogin();
+  if (!user) {
+    // A password-reset email links back here as /?resetToken=... — caught before the normal
+    // login screen so following that link works the same whether or not this device happens to
+    // already have a stale/expired session lying around.
+    const resetToken = new URLSearchParams(location.search).get('resetToken');
+    return resetToken ? renderResetPassword(resetToken) : renderLogin();
+  }
   const tabs = TABS[user.role];
   if (!tabs.includes(tab)) setTab(tabs[0]);
   // programmes/notices are only pulled for the top-bar search when the signed-in role can
@@ -389,6 +395,68 @@ const LOGIN_FEATURES = [
   ['finance', 'Giving, pledges and reports tracked automatically'],
   ['calendar', 'Programmes and events everyone can see'],
 ];
+// The login screen's "Forgot password?" link — a small modal that always ends with the same
+// generic confirmation, whether or not the email actually has an account (the server itself
+// never says either way — see its own note on that in server/src/app.js), so this can't be used
+// to find out who has an account here.
+function openForgotPassword(prefillValue) {
+  const emailIn = h('input', { type: 'email', required: true, autocomplete: 'email', value: prefillValue || '' });
+  const btn = h('button', { class: 'btn block' }, 'Send reset link');
+  const send = async () => {
+    const email = emailIn.value.trim();
+    if (!email) return emailIn.focus();
+    btn.disabled = true;
+    try { await repo.requestPasswordReset(email); }
+    catch { /* the endpoint itself never errors for a bad/unknown email — only a real network problem lands here, and the message below still covers it fine */ }
+    m.close();
+    toast("If that email has an account, we've sent a link to reset the password.");
+  };
+  btn.onclick = send;
+  const m = modal('Reset your password', h('div', {},
+    h('p', {}, "Enter the email on your account — if it has one, we'll send a link to reset the password."),
+    h('label', {}, 'Email'), emailIn,
+    h('p', { class: 'actions' }, btn)));
+  emailIn.focus();
+}
+
+// Reached from /?resetToken=... (see render()'s check above), the link a password-reset email
+// (server/src/email.js) sends out. Its own login-shell/login-card markup below deliberately
+// mirrors renderLogin()'s — same brand mark and layout — rather than reusing renderLogin() itself,
+// since this screen needs none of its login/register mode-switching, just one password field.
+function renderResetPassword(token) {
+  const err = h('div', { class: 'err', role: 'alert' });
+  const f = h('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    const btn = f.querySelector('button'); btn.disabled = true;
+    try {
+      await repo.resetPassword(token, f.elements.password.value);
+      // Drop the one-time token from the address bar now that it's spent, so refreshing this tab
+      // (or a share/bookmark of it) can't try to reuse it or leave it sitting in browser history.
+      history.replaceState(null, '', location.pathname);
+      toast('Password updated — sign in with your new password.');
+      render();
+    } catch (ex) {
+      err.textContent = ex.message === 'Failed to fetch' ? 'Cannot reach the server. Try again once you\'re online.' : ex.message;
+      btn.disabled = false;
+    }
+  } },
+    passwordField('New password', { autocomplete: 'new-password', withStrength: true }), err,
+    h('p', {}, h('button', { class: 'btn block' }, 'Set new password')));
+  const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
+    h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
+  root.replaceChildren(h('div', { class: 'login-shell' },
+    h('div', { class: 'login-aside' },
+      h('div', { class: 'login-aside-body' },
+        brandRow('login-aside-brand'),
+        h('h2', {}, 'Choose a new password.'), h('p', {}, "Pick something you haven't used here before — you'll use it to sign in from now on.")),
+      h('div', { class: 'login-aside-watermark' }, icon('church', { size: 220 }))),
+    h('div', { class: 'login-main' }, h('div', { class: 'card login-card' },
+      brandRow('login-mobile-brand'),
+      h('h1', {}, 'Reset your password'), h('p', { class: 'subtitle' }, 'This link only works once.'),
+      f,
+      h('p', { class: 'switch' }, h('a', { href: '#', onclick: (e) => { e.preventDefault(); history.replaceState(null, '', location.pathname); render(); } }, 'Back to sign in'))))));
+}
+
 function renderLogin() {
   let mode = 'login';
   // Set right after a successful registration so the login screen that follows can prefill the
@@ -404,6 +472,7 @@ function renderLogin() {
   const draw = () => {
     const c = COPY[mode];
     const err = h('div', { class: 'err', role: 'alert' });
+    const emailInput = h('input', { name: 'email', type: 'email', required: true, autocomplete: 'username', value: prefillEmail });
     const f = h('form', { onsubmit: async (e) => {
       e.preventDefault();
       const g = (n) => f.elements[n].value.trim();
@@ -426,10 +495,11 @@ function renderLogin() {
       } catch (ex) { err.textContent = ex.message === 'Failed to fetch' ? 'Cannot reach the server. The first sign-in needs internet.' : ex.message; btn.disabled = false; }
     } },
       mode === 'register' && [h('label', {}, 'Church name'), h('input', { name: 'church', required: true }), h('label', {}, 'Your name'), h('input', { name: 'name', required: true, autocomplete: 'name' })],
-      h('label', {}, 'Email'), h('input', { name: 'email', type: 'email', required: true, autocomplete: 'username', value: prefillEmail }),
+      h('label', {}, 'Email'), emailInput,
       // The strength meter only makes sense while picking a *new* password — signing in shows
       // just the reveal toggle, not a live grade of a password that's already set.
       passwordField('Password', { autocomplete: mode === 'login' ? 'current-password' : 'new-password', withStrength: mode === 'register' }), err,
+      mode === 'login' && h('p', { class: 'forgot-link' }, h('a', { href: '#', onclick: (e) => { e.preventDefault(); openForgotPassword(emailInput.value.trim()); } }, 'Forgot password?')),
       h('p', {}, h('button', { class: 'btn block' }, c.btn)));
     prefillEmail = '';
     const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),

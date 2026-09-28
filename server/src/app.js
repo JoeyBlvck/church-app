@@ -1,13 +1,15 @@
 import http from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { hashPassword, verifyPassword, signToken, verifyToken } from './auth.js';
 import { COLLECTIONS, canRead, canWrite, ministryOf } from './permissions.js';
 import { normalizeGhanaPhone, sendSms, SmsConfigError } from './sms.js';
 import { initializeTransaction, verifyTransaction, verifySignature, PaystackConfigError } from './paystack.js';
 import { sendTemplateMessage, sendTextMessage, verifyWebhookChallenge, parseInboundMessage, WhatsAppConfigError } from './whatsapp.js';
+import { sendPasswordResetEmail } from './email.js';
 
 const SENDER_ID_RE = /^[A-Za-z0-9 ]{3,11}$/;
 const GIVING_PURPOSES = ['tithe', 'offering', 'welfare', 'donation'];
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour — long enough to find the email, short enough that a stale, unused link isn't a standing risk
 // One shared secret the whole app checks Meta's webhook-verification handshake against (see
 // whatsapp.js's verifyWebhookChallenge) — every church enters this same value when setting up
 // their own Meta App's webhook, since the handshake only proves this server owns the endpoint
@@ -30,9 +32,11 @@ const RATE_LIMITED_ROUTES = new Map([
   ['POST /auth/register-church', { windowMs: 60_000, max: 5 }],
   ['POST /checkin', { windowMs: 60_000, max: 20 }],
   ['POST /give/init', { windowMs: 60_000, max: 20 }],
+  ['POST /auth/request-password-reset', { windowMs: 60_000, max: 5 }],
+  ['POST /auth/reset-password', { windowMs: 60_000, max: 10 }],
 ]);
 
-export function createApp(db, { secret = 'dev-secret-change-me' } = {}) {
+export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', sendPasswordResetEmailImpl } = {}) {
   // In-memory and per-app-instance on purpose: this runs as a single Node process (see
   // server/src/index.js), so there's no shared store to coordinate with — if this is ever scaled
   // to more than one instance, this needs to move to something shared (e.g. Redis) instead, or a
@@ -222,6 +226,51 @@ export function createApp(db, { secret = 'dev-secret-change-me' } = {}) {
       if (q.tenantById.get(row.tenant_id)?.plan === 'suspended')
         throw new HttpError(403, "This church's account has been suspended. Contact your church administrator.");
       return session(row);
+    },
+
+    // "Forgot password" — until now, only an owner/admin could reset a colleague's password
+    // (POST /users/update below), which left the owner's own account with no recovery path at
+    // all if they forgot it. This emails a one-time link instead (server/src/email.js). The
+    // reply is identical whether or not the address has an account, and never mentions which —
+    // same reasoning as /checkin's own note on this further down: an attacker probing emails one
+    // at a time must learn nothing from the response, only ever "ok" either way.
+    'POST /auth/request-password-reset': async (req, body) => {
+      const email = (body.email ?? '').trim().toLowerCase();
+      const row = email && q.tenantByEmail.get(email);
+      if (row && row.active) {
+        const rawToken = randomBytes(32).toString('hex');
+        const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+        db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(row.id); // at most one live link per account
+        db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?,?,?)')
+          .run(tokenHash, row.id, Date.now() + RESET_TOKEN_TTL_MS);
+        if (!appUrl) {
+          console.error('Cannot send password reset email: APP_URL is not set.');
+        } else {
+          const resetUrl = `${appUrl}/?resetToken=${rawToken}`;
+          const send = sendPasswordResetEmailImpl ?? sendPasswordResetEmail;
+          // A bad SMTP password or a down mail provider must never change the response below —
+          // that would leak whether this address has an account just as surely as an error message
+          // naming it outright would.
+          try { await send({ to: row.email, name: row.name, resetUrl }); }
+          catch (e) { console.error('Could not send password reset email:', e.message); }
+        }
+      }
+      return { ok: true };
+    },
+
+    // The other half of the flow above: spends a one-time token for a new password. Deliberately
+    // takes no Authorization header at all — arriving in an email sent only to the account's own
+    // inbox is what proves it's really that person, the same way a login form's password does.
+    'POST /auth/reset-password': (req, body) => {
+      const rawToken = body.token ?? '';
+      if (!rawToken || (body.password ?? '').length < 8) throw new HttpError(400, 'token and 8+ char password required');
+      const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+      const row = db.prepare('SELECT * FROM password_resets WHERE token_hash = ?').get(tokenHash);
+      if (!row || row.used_at || row.expires_at < Date.now())
+        throw new HttpError(400, 'This reset link is invalid or has expired — request a new one.');
+      db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(body.password), row.user_id);
+      db.prepare('UPDATE password_resets SET used_at = ? WHERE token_hash = ?').run(Date.now(), tokenHash);
+      return { ok: true };
     },
 
     'GET /users': (req) => {

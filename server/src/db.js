@@ -68,6 +68,16 @@ export function openDb(path = ':memory:') {
       id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
       pass_hash TEXT NOT NULL, created_at INTEGER NOT NULL
     );
+    -- One row per outstanding "forgot password" link (server/src/app.js's POST
+    -- /auth/request-password-reset + POST /auth/reset-password, emailed via server/src/email.js).
+    -- token_hash, never the raw token itself, the same reasoning as users.pass_hash: a leaked
+    -- database can't be used to reset anyone's password. Requesting a new link deletes any
+    -- previous one for that user first, so at most one is ever live; used_at marks a token
+    -- permanently spent even before its expiry.
+    CREATE TABLE IF NOT EXISTS password_resets (
+      token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+      expires_at INTEGER NOT NULL, used_at INTEGER
+    );
     CREATE TABLE IF NOT EXISTS records (
       tenant_id TEXT NOT NULL, collection TEXT NOT NULL, id TEXT NOT NULL,
       data TEXT NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,

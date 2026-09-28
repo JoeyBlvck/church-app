@@ -563,6 +563,9 @@ ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7
 .login-card label:first-of-type { margin-top:0; }
 .switch { text-align:center; margin-top:20px; font-size:13.5px; color:var(--mute); }
 .center { text-align:center; }
+/* "Forgot password?" — sits right above the sign-in button rather than centered like .switch
+   above, since it only applies to the password field just above it, not the whole form. */
+.forgot-link { text-align:right; margin:-6px 0 2px; font-size:13px; }
 
 /* ---------- login (the church app's own sign-in/registration) ---------- */
 /* Two panes side by side on anything wide enough: a hero-gradient info pane (same gradient/glow/
