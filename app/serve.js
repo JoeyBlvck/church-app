@@ -11,7 +11,11 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
-import { fetchEnrolledUsers } from '../server/src/hikvision.js';
+// NOTE: server/src/hikvision.js is loaded lazily inside pullDeviceUsers() below, not imported here.
+// This file is deployed on its own (no sibling server/ folder) when hosted — e.g. Railway builds
+// the `app` service from just this directory — so a top-level import of it would crash the whole
+// static server on startup there. It only exists on a church's own computer running this script
+// locally alongside the full repo, which is the only place the clock-in device is reachable anyway.
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.webmanifest': 'application/manifest+json' };
 const root = new URL('.', import.meta.url).pathname;
 const configPath = join(root, '..', 'server', 'hikvision.config.json');
@@ -24,6 +28,9 @@ async function pullDeviceUsers(res) {
   let config;
   try { config = JSON.parse(await readFile(configPath, 'utf8')); }
   catch { return sendJson(res, 404, { error: 'No server/hikvision.config.json found on this computer. Copy server/hikvision.config.example.json, fill in the clock-in device\'s address and admin login, and try again.' }); }
+  let fetchEnrolledUsers;
+  try { ({ fetchEnrolledUsers } = await import('../server/src/hikvision.js')); }
+  catch { return sendJson(res, 404, { error: 'The clock-in device feature needs the full project checkout (server/ folder) on this computer — it\'s not available on the hosted copy of the app.' }); }
   try {
     const users = await fetchEnrolledUsers({ baseUrl: config.device?.host, username: config.device?.username, password: config.device?.password });
     sendJson(res, 200, { users });
