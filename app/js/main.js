@@ -391,6 +391,10 @@ const LOGIN_FEATURES = [
 ];
 function renderLogin() {
   let mode = 'login';
+  // Set right after a successful registration so the login screen that follows can prefill the
+  // email the person just chose — cleared as soon as it's been used, so it never leaks into a
+  // later plain sign-in.
+  let prefillEmail = '';
   const COPY = {
     login: { h1: 'Welcome back', sub: "Sign in to your church's workspace.", btn: 'Sign in', switchTo: 'Register a new church',
       asideH: 'Good to see you again.', asideP: 'Pick up right where you left off — your members, attendance and giving are all synced and waiting.' },
@@ -405,17 +409,29 @@ function renderLogin() {
       const g = (n) => f.elements[n].value.trim();
       const btn = f.querySelector('button'); btn.disabled = true;
       try {
-        if (mode === 'login') await repo.login(g('email'), f.elements.password.value);
-        else await repo.registerChurch({ churchName: g('church'), name: g('name'), email: g('email'), password: f.elements.password.value });
-        await sync(); render();
+        if (mode === 'login') {
+          await repo.login(g('email'), f.elements.password.value);
+          await sync(); render();
+        } else {
+          const email = g('email');
+          await repo.registerChurch({ churchName: g('church'), name: g('name'), email, password: f.elements.password.value });
+          // Registering signs the account in server-side, but we don't want to drop the person
+          // straight into the dashboard — send them back to the sign-in screen so they log in
+          // explicitly, same as anyone else. Nothing has synced yet at this point, so clearing
+          // the session here can't lose any data.
+          await repo.logout();
+          toast('Church created — sign in to get started.');
+          mode = 'login'; prefillEmail = email; draw();
+        }
       } catch (ex) { err.textContent = ex.message === 'Failed to fetch' ? 'Cannot reach the server. The first sign-in needs internet.' : ex.message; btn.disabled = false; }
     } },
       mode === 'register' && [h('label', {}, 'Church name'), h('input', { name: 'church', required: true }), h('label', {}, 'Your name'), h('input', { name: 'name', required: true, autocomplete: 'name' })],
-      h('label', {}, 'Email'), h('input', { name: 'email', type: 'email', required: true, autocomplete: 'username' }),
+      h('label', {}, 'Email'), h('input', { name: 'email', type: 'email', required: true, autocomplete: 'username', value: prefillEmail }),
       // The strength meter only makes sense while picking a *new* password — signing in shows
       // just the reveal toggle, not a live grade of a password that's already set.
       passwordField('Password', { autocomplete: mode === 'login' ? 'current-password' : 'new-password', withStrength: mode === 'register' }), err,
       h('p', {}, h('button', { class: 'btn block' }, c.btn)));
+    prefillEmail = '';
     const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
       h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
     root.replaceChildren(h('div', { class: 'login-shell' },
