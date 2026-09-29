@@ -378,7 +378,7 @@ async function render() {
         h('h1', {}, 'The Church', h('span', {}, 'Flow'), h('small', {}, churchSettings.motto || 'Church management'))),
       h('div', { class: 'navlinks' }, navItems),
       h('button', { class: 'signout', onclick: async () => { if (!pending || confirm(`${pending} changes haven't synced and will be lost. Sign out anyway?`)) { await repo.logout(); setTab(null); render(); } } }, h('span', { class: 'ico' }, icon('signout')), h('span', {}, 'Sign out'))),
-    h('main', {}, h('div', { class: 'bar top' }, topBar), view),
+    h('main', {}, h('div', { class: 'bar top' }, topBar), h('div', { class: 'view-enter' }, view)),
     mobileTabbar));
 }
 

@@ -2,6 +2,7 @@ import { h, field, val, opts, download, today, toast, confirmDialog, fmtDate, ph
 import { icon } from '../icons.js';
 import { toCSV } from '../csv.js';
 import { renderQrToCanvas, qrToSvgString } from '../vendor/qrcode.js';
+import { getTheme, setTheme } from '../theme.js';
 
 // The 16 regions of Ghana (2019 boundaries) — a convenience picker, since this app is built
 // for Ghanaian churches; District and Location stay free text since there are far too many
@@ -33,6 +34,13 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     try { await repo.changePassword(val(pw, 'cur'), val(pw, 'next')); pw.reset(); toast('Password changed'); } catch (ex) { toast(ex.message, 'err'); } } },
     h('div', { class: 'row' }, field('Current password', h('input', { name: 'cur', type: 'password', required: true, autocomplete: 'current-password' })), field('New password', h('input', { name: 'next', type: 'password', minlength: 8, required: true, autocomplete: 'new-password' }))),
     h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Change password')));
+
+  // Light/dark is a personal, per-device display preference (app/js/theme.js), not something
+  // that syncs between a person's own devices or is visible to anyone else — so this just flips
+  // it immediately and re-renders, with no form/save step of its own.
+  const themeTabs = h('div', { class: 'tabs' },
+    h('button', { type: 'button', class: getTheme() === 'light' ? 'on' : '', onclick: () => { setTheme('light'); rerender(); } }, 'Light'),
+    h('button', { type: 'button', class: getTheme() === 'dark' ? 'on' : '', onclick: () => { setTheme('dark'); rerender(); } }, 'Dark'));
   // ---- church profile: logo, motto, location, district, region, dashboard background photo ----
   // Everyone can read this (it shows in the sidebar for every role); only owner/admin may
   // change it, so a leader/treasurer/secretary just sees it laid out, not an edit form.
@@ -170,6 +178,8 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     // signed-in person's own settings, not something they have to scroll past the rest to find.
     h('div', { class: 'card', id: 'my-profile' }, h('b', {}, 'My profile'), profile),
     h('div', { class: 'card' }, h('b', {}, 'Password'), pw),
+    h('div', { class: 'card' }, h('b', {}, 'Appearance'),
+      h('p', { class: 'hint' }, 'Only affects this device/browser — everyone signed in here chooses their own.'), themeTabs),
     churchCard,
     canManageChurch && h('div', { class: 'card' }, h('b', {}, 'SMS (Arkesel)'), smsForm),
     canManageChurch && h('div', { class: 'card' }, h('b', {}, 'Online giving (Paystack)'), paystackForm),

@@ -8,7 +8,9 @@
      the main call-to-action buttons and highlights, cards stay plain white/opaque.
      --navy/--navy-hover/--primary/--primary-hover/--accent (and its hover/ink)/--tone-* are NOT
      redefined in dark mode below — same as before: these brand colors stay identical across the
-     light/dark toggle. */
+     light/dark toggle (app/js/theme.js — Settings > Appearance in the main app; every other page
+     — admin console, QR check-in, public giving — has no toggle and always stays on this light
+     palette, since :root[data-theme="dark"] below is never set there). */
   --navy:#0d2b27; --navy-hover:#155249;
   --primary:#0C756F; --primary-hover:#095e59;
   --accent:#FDCF6F; --accent-hover:#f2b73f; --accent-ink:#3d2c05;
@@ -29,18 +31,34 @@
   --hero-gradient: linear-gradient(135deg, #0d2b27 0%, #155249 38%, #0C756F 72%, #17a696 100%);
   --hero-glow: var(--accent); --hero-text: #EFEADB;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-base:#101c2e; --panel:#18283f; --pill:#173832;
-    --ink:#e3ebf8; --mute:#a8b8cf; --line:#334760;
-    --bad:#ff9a90; --bad-bg:rgba(180,35,24,.24); --ok:#59d99a; --ok-bg:rgba(13,138,82,.22); --warn-bg:rgba(182,91,9,.24); --warn-ink:#f0b673;
-    --shadow:0 4px 20px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
-    --shadow-lift:0 14px 40px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
-  }
+/* Dark palette — applied only when :root carries data-theme="dark" (set by app/js/theme.js,
+   flipped from Settings > Appearance), never automatically from the device's own light/dark
+   setting. This used to be a `@media (prefers-color-scheme: dark)` block, which meant the whole
+   app — including the platform admin console, the public giving page and the QR check-in page,
+   none of which have any theme control of their own — silently went dark for anyone whose
+   device happened to be set to dark mode, with no way back short of an OS-level change. */
+:root[data-theme="dark"] {
+  --bg-base:#101c2e; --panel:#18283f; --pill:#173832;
+  --ink:#e3ebf8; --mute:#a8b8cf; --line:#334760;
+  --bad:#ff9a90; --bad-bg:rgba(180,35,24,.24); --ok:#59d99a; --ok-bg:rgba(13,138,82,.22); --warn-bg:rgba(182,91,9,.24); --warn-ink:#f0b673;
+  --shadow:0 4px 20px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
+  --shadow-lift:0 14px 40px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
 }
 * { box-sizing: border-box; }
 [hidden] { display:none !important; }
-html { color-scheme: light dark; }
+/* color-scheme drives native UI (form controls, scrollbars) to match — "light" by default, kept
+   in sync with data-theme so those don't go dark on their own ahead of the toggle either. */
+html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+
+/* A brief fade+lift on the main content whenever it's swapped for a new screen (tab switch, or a
+   view refreshing itself after a save) — see .view-enter in app/js/main.js. Kept short and
+   subtle on purpose: this should read as "polished", not be something people notice or wait on.
+   Respects prefers-reduced-motion, since a fade on every navigation is exactly the kind of motion
+   that setting exists to suppress. */
+@keyframes view-fade-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.view-enter { animation: view-fade-in .18s ease-out; }
+@media (prefers-reduced-motion: reduce) { .view-enter { animation: none; } }
 body {
   margin:0; font:15px/1.48 'Inter',-apple-system,"Segoe UI",system-ui,sans-serif; color:var(--ink);
   background:var(--bg-base);
