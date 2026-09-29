@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 // module to import cleanly. Nothing under test here touches the DOM.
 globalThis.location = { hostname: 'test', protocol: 'http:' };
 globalThis.localStorage = { getItem: () => null };
-const { isNetworkError, attendanceCount } = await import('../js/ui.js');
+const { isNetworkError, attendanceCount, fmtTime } = await import('../js/ui.js');
 
 test('isNetworkError recognizes a fetch()-level network failure regardless of the browser engine’s wording', () => {
   assert.equal(isNetworkError(new TypeError('Failed to fetch')), true);                               // Chrome/Edge/WebView2 — the Windows desktop build
@@ -30,4 +30,13 @@ test('attendanceCount counts Present and Late toward the total, but not Excused 
   assert.equal(attendanceCount({ presentIds: ['a', 'b'], lateIds: ['c'], excusedIds: ['d'], extra: 2 }), 5); // 2 present + 1 late + 2 extra — excused (d) not counted
   assert.equal(attendanceCount({ presentIds: ['a'] }), 1); // old records with no lateIds/excusedIds/extra at all still work
   assert.equal(attendanceCount({}), 0);
+});
+
+test('fmtTime always shows AM/PM, regardless of what the locale would otherwise default to -- a ministry meeting time (the one place this is used, see ministries.js) should never silently read as an ambiguous 24-hour "18:00"', () => {
+  assert.equal(fmtTime('18:00'), '6:00 PM');
+  assert.equal(fmtTime('09:05'), '9:05 AM');
+  assert.equal(fmtTime('00:00'), '12:00 AM');
+  assert.equal(fmtTime('12:00'), '12:00 PM');
+  assert.equal(fmtTime(''), '');
+  assert.equal(fmtTime(undefined), '');
 });

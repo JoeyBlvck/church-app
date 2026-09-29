@@ -61,7 +61,10 @@ export function ageFromBirthday(d) {
 export const fmtTime = (t) => {
   if (!t) return '';
   const [h, m] = t.split(':').map(Number);
-  return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  // hour12 is forced rather than left to the locale default: a ministry's meeting time (the one
+  // place this is shown -- see ministries.js's meetLabel) needs to read unambiguously as "6:00
+  // PM", not silently fall back to a bare 24-hour "18:00" on a device/locale that defaults to it.
+  return new Date(2000, 0, 1, h, m).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true });
 };
 // A short "3 days ago" style label for a plain YYYY-MM-DD (or full ISO) date string —
 // used by the dashboard's recent-activity feed.
