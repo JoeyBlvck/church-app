@@ -14,8 +14,17 @@ name: Build desktop app (Mac + Windows)
 # Manual only for now (Actions tab → "Build desktop app (Mac + Windows)" → Run workflow),
 # so it doesn't burn CI minutes on every push while this is still early / unsigned. Once
 # this is ready for real users, this can be switched to trigger on version tags instead.
+#
+# Every run publishes its installers to a single rolling GitHub Release tagged "latest" —
+# tauri-action creates it on the first run and just replaces its assets on every run after
+# that, so the download page (app/download.html) always has one stable set of URLs to link to
+# instead of a new one per version. `contents: write` is required for GITHUB_TOKEN to be
+# allowed to create/update that release; without it this step fails with a 403.
 on:
   workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -54,10 +63,15 @@ jobs:
       - name: Install the Tauri CLI
         run: npm install
 
-      - name: Build the app (unsigned)
+      - name: Build the app (unsigned) and publish it to the "latest" release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: latest
+          releaseName: 'The ChurchFlow — latest build'
+          releaseBody: 'Automatically built from the latest main branch by the "Build desktop app" workflow. Unsigned — see the README for what that means the first time you open it.'
+          releaseDraft: false
+          prerelease: false
           uploadWorkflowArtifacts: true
           args: ${{ matrix.tauriArgs }}
