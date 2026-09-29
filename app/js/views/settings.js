@@ -171,6 +171,31 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Save')));
   if (qrCanvas) renderQrToCanvas(qrCanvas, checkinLink, { moduleSize: 6 });
 
+  // ---- Factory reset: owner/admin only, and deliberately the very last, most visually distinct
+  // thing on the page (see '.card.danger-zone' in style.css) -- wipes every member, household,
+  // attendance record, transaction, ministry, and setting this church has ever saved, but keeps
+  // this login and every other staff login working, so there's something to sign back into
+  // afterwards. See server/src/app.js's POST /account/factory-reset for exactly what "wipe"
+  // means (a real tombstone-based delete, not a local-only one) -- every other signed-in device
+  // picks this up on its own next sync, same as any other delete.
+  const resetForm = canManageChurch && h('form', { onsubmit: async (e) => { e.preventDefault();
+    const typedName = val(resetForm, 'churchName');
+    if (typedName !== (church ?? '')) return toast("That doesn't match your church's name exactly.", 'err');
+    if (!(await confirmDialog(`This permanently deletes every member, attendance record, transaction, and everything else "${church}" has ever saved -- on every device, the next time each one syncs. Staff logins are kept, so you can sign back in to an empty church afterwards. This cannot be undone.`, 'Delete everything'))) return;
+    const btn = resetForm.querySelector('button[type=submit]'); if (btn) btn.disabled = true;
+    try {
+      await repo.factoryReset(val(resetForm, 'password'), typedName);
+      toast('Church data wiped -- starting fresh.');
+      rerender();
+    } catch (ex) { toast(ex.message, 'err'); }
+    finally { if (btn) btn.disabled = false; }
+  } },
+    h('p', { class: 'hint' }, `Type your church's name exactly ("${church ?? ''}") and enter your password to permanently wipe every member, household, attendance record, transaction, ministry, and setting this church has ever saved. Staff logins are kept -- there's just nothing left in them afterwards. This cannot be undone.`),
+    h('div', { class: 'row' },
+      field('Church name', h('input', { name: 'churchName', placeholder: church ?? '', autocomplete: 'off' })),
+      field('Your password', h('input', { name: 'password', type: 'password', required: true, autocomplete: 'current-password' }))),
+    h('p', { class: 'actions' }, h('button', { type: 'submit', class: 'btn danger' }, 'Delete all church data')));
+
   return h('div', {}, h('h2', {}, 'Settings'),
     h('div', { class: 'card' }, h('b', {}, church ?? 'Your church'), h('p', { class: 'hint' }, `${user.name} · ${user.email} · ${user.role}`)),
     // My profile and Password come right after the church summary, ahead of church-wide/admin
@@ -214,5 +239,6 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
           toast(`Downloaded ${data.users.length} enrolled ${data.users.length === 1 ? 'person' : 'people'} as a spreadsheet — open it in Excel, fill in the rest, then upload it under Members.`);
         } catch (ex) { toast(ex.message, 'err'); }
         finally { btn.disabled = false; }
-      } }, icon('download', { size: 15 }), 'Pull enrolled users from device'))));
+      } }, icon('download', { size: 15 }), 'Pull enrolled users from device'))),
+    canManageChurch && h('div', { class: 'card danger-zone' }, h('b', {}, 'Danger zone'), resetForm));
 }

@@ -353,6 +353,41 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       return { ok: true };
     },
 
+    // Danger zone: wipes every record this church has ever synced -- members, attendance,
+    // finance, ministries, even the church profile/settings -- but keeps the tenant itself and
+    // every staff login intact, so signing back in afterwards starts from a genuinely clean
+    // slate rather than requiring a brand new registration. Meant for a botched import or
+    // resetting a demo/pilot account. There's no undo, so this is gated behind BOTH re-entering
+    // the caller's own current password AND typing the church's name back exactly, on top of the
+    // owner/admin role check every other account-level action here already has.
+    //
+    // Implemented as a soft-delete of every existing row (the same shape /sync/push already uses
+    // for an ordinary delete), each getting its own freshly bumped seq -- never a hard SQL DELETE
+    // -- so every other signed-in device picks up the wipe as a normal tombstone on its own next
+    // sync, exactly like any other delete, instead of being left with stale local data that no
+    // sync will ever explain away.
+    'POST /account/factory-reset': (req, body) => {
+      const u = auth(req);
+      if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden');
+      const row = q.userByIdAny.get(u.id);
+      if (!verifyPassword(body.password ?? '', row.pass_hash)) throw new HttpError(401, 'current password is wrong');
+      const t = q.tenantById.get(u.tenantId);
+      if ((body.churchName ?? '').trim() !== t.name) throw new HttpError(400, "That doesn't match your church's name exactly -- nothing was deleted.");
+      const live = db.prepare('SELECT collection, id FROM records WHERE tenant_id = ? AND deleted = 0').all(u.tenantId);
+      const markDeleted = db.prepare('UPDATE records SET deleted = 1, updated_at = ?, seq = ? WHERE tenant_id = ? AND collection = ? AND id = ?');
+      const now = Date.now();
+      db.exec('BEGIN');
+      try {
+        for (const r of live) {
+          const { seq } = q.bump.get(u.tenantId);
+          markDeleted.run(now, seq, u.tenantId, r.collection, r.id);
+        }
+        db.prepare('DELETE FROM giving_intents WHERE tenant_id = ?').run(u.tenantId);
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
+      return { ok: true, wiped: live.length };
+    },
+
     // A signed-in user editing their own name/email/photo — distinct from /users/update, which
     // is admin-only and manages OTHER staff accounts (role, ministries, active, password).
     // `photo` is optional and, like the church logo and member photos, arrives pre-compressed

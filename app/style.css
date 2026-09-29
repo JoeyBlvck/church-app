@@ -211,6 +211,7 @@ p.actions { margin:14px 0 0; }
 }
 .card.click, tr.click { cursor:pointer; transition:transform .12s, box-shadow .12s, border-color .12s; }
 .card.click:hover { border-color:color-mix(in srgb, var(--primary) 35%, var(--line)); box-shadow:var(--shadow-lift); transform:translateY(-2px); }
+.card.danger-zone { border-color:color-mix(in srgb, var(--bad) 40%, var(--line)); }
 tbody tr.click:hover td { background:var(--pill); }
 .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(170px,100%),1fr)); gap:14px; margin-bottom:14px; }
 .grid.wide { grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr)); }

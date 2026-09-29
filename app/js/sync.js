@@ -180,6 +180,18 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
       if (await repo.pending()) throw new Error('Sync your pending changes first.');
       await store.wipeData(); return repo.sync();
     },
+    // Wipes every record this church has ever synced (see server's POST /account/factory-reset
+    // for exactly what that does and doesn't touch). Requires no pending local edits first --
+    // same rule as resync() above -- so a half-finished edit on this device can't get pushed
+    // right back into existence the moment sync() below pulls the wipe down. sync() itself is
+    // what actually clears this device's own local copies: the server marks every record
+    // deleted with a fresh seq, so the very next pull brings those tombstones down like any
+    // other delete, rather than needing a separate local wipe here.
+    async factoryReset(password, churchName) {
+      if (await repo.pending()) throw new Error('Sync your pending changes first.');
+      await http('POST', '/account/factory-reset', { password, churchName });
+      return repo.sync();
+    },
     async backup() {
       const all = await store.everything();
       return JSON.stringify({ exportedAt: new Date().toISOString(), user: await store.getMeta('user'),
