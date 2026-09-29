@@ -1,6 +1,6 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
-import { API_URL } from './config.js';
+import { API_URL, isTauri } from './config.js';
 import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal } from './ui.js';
 import { icon } from './icons.js';
 
@@ -543,6 +543,56 @@ function renderLogin() {
 
 addEventListener('online', () => { online = true; sync(); });
 addEventListener('offline', () => { online = false; if (!isEditingPage()) render(); }); // don't wipe an in-progress form just to flip the status dot (see isEditingPage() above); it'll show on the next render regardless
+
+// ---- auto sign-out after inactivity (browser/PWA only) ----------------------------------------
+// A shared church-office computer left signed in on a browser tab is easy to forget about; the
+// Tauri desktop build (see isTauri in config.js) is skipped, since that's a device someone already
+// had to be signed into on their own — leaving it open isn't the same exposure as a browser tab.
+const IDLE_LIMIT_MS = 30 * 60_000; // no mouse/keyboard/touch activity for this long...
+const IDLE_WARNING_MS = 60_000;    // ...shows this countdown before actually signing out
+let idleTimer = null, idleCountdown = null, idleModal = null, lastIdleReset = 0;
+
+async function idleSignOut() {
+  clearInterval(idleCountdown); idleCountdown = null;
+  idleModal?.close(); idleModal = null;
+  if (!(await repo.user())) return; // already signed out some other way (e.g. a 401) meanwhile
+  await repo.logout();
+  setTab(null);
+  render();
+  toast('Signed out after 30 minutes of inactivity.');
+}
+
+async function showIdleWarning() {
+  if (!(await repo.user())) return; // nothing to protect — e.g. sitting on the login screen
+  let secondsLeft = Math.round(IDLE_WARNING_MS / 1000);
+  const countEl = h('b', {}, String(secondsLeft));
+  idleModal = modal('Still there?', h('div', {},
+    h('p', {}, 'You’ll be signed out in ', countEl, ' seconds because of inactivity.'),
+    h('p', { class: 'actions' }, h('button', { class: 'btn block', onclick: () => resetIdleTimer(true) }, 'Stay signed in'))));
+  idleCountdown = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft <= 0) idleSignOut();
+    else countEl.textContent = String(secondsLeft);
+  }, 1000);
+}
+
+// Runs on every real mouse/keyboard/touch event (throttled below), and on the warning modal's own
+// "Stay signed in" button (force: true, so that one always takes effect at once).
+function resetIdleTimer(force = false) {
+  const now = Date.now();
+  if (!force && !idleModal && now - lastIdleReset < 2000) return; // don't churn a timer reset on every single mousemove; react instantly once the warning is up, though
+  lastIdleReset = now;
+  clearTimeout(idleTimer); clearInterval(idleCountdown); idleCountdown = null;
+  if (idleModal) { idleModal.close(); idleModal = null; }
+  idleTimer = setTimeout(showIdleWarning, IDLE_LIMIT_MS - IDLE_WARNING_MS);
+}
+
+if (!isTauri) {
+  ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach((ev) =>
+    addEventListener(ev, () => resetIdleTimer(), { passive: true, capture: true }));
+  resetIdleTimer(true);
+}
+
 // The notification bell (see notificationBell() above), any ui.js menu() dropdown, and phone's
 // own bottom-bar "More" panel (mobileTabbar's .mobile-more, above) are all native
 // <details>/<summary> — clicking their own summary toggles them, and a full render() (e.g.

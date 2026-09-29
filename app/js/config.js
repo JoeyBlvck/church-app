@@ -8,7 +8,7 @@ const PRODUCTION_API_URL = 'https://church-manager-server-production.up.railway.
 // machine. window.__TAURI_INTERNALS__ is always present in a Tauri build
 // (dev or packaged), so check that first and never treat a Tauri build as
 // local dev.
-const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 const isLocalDev = !isTauri && ['localhost', '127.0.0.1', ''].includes(location.hostname);
 export const API_URL = localStorage.getItem('apiUrl') ?? (isLocalDev ? 'http://localhost:8787' : PRODUCTION_API_URL);
 export const CURRENCY = 'GHS';
