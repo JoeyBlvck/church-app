@@ -11,7 +11,7 @@
 // still untouchable here, created once at church creation and never edited from this console,
 // the same line server/src/app.js's own POST /users/update already draws for a church's own
 // admins.
-import { h, field, val, opts, byName, fmtDate, modal, confirmDialog, toast, photoPicker } from './ui.js';
+import { h, field, val, opts, byName, fmtDate, modal, confirmDialog, toast, photoPicker, isNetworkError } from './ui.js';
 import { icon } from './icons.js';
 import { API_URL } from './config.js';
 
@@ -36,7 +36,7 @@ async function render() {
   try { tenants = await api('GET', '/admin/tenants'); }
   catch (e) {
     if (e.message === 'unauthorized') { setToken(null); return renderLogin(); }
-    root.replaceChildren(h('div', { class: 'login-page' }, h('div', { class: 'card' }, h('p', { class: 'err' }, e.message),
+    root.replaceChildren(h('div', { class: 'login-page' }, h('div', { class: 'card' }, h('p', { class: 'err' }, isNetworkError(e) ? 'Cannot reach the server. Check your connection and try again.' : e.message),
       h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: render }, 'Retry')))));
     return;
   }
@@ -54,7 +54,7 @@ function renderLogin() {
     try {
       const r = await api('POST', '/admin/login', { email: val(f, 'email'), password: f.elements.password.value });
       setToken(r.token); render();
-    } catch (ex) { err.textContent = ex.message === 'Failed to fetch' ? 'Cannot reach the server.' : ex.message; btn.disabled = false; }
+    } catch (ex) { err.textContent = isNetworkError(ex) ? 'Cannot reach the server.' : ex.message; btn.disabled = false; }
   } },
     h('label', {}, 'Email'), h('input', { name: 'email', type: 'email', required: true, autocomplete: 'username' }),
     h('label', {}, 'Password'), h('input', { name: 'password', type: 'password', required: true, autocomplete: 'current-password' }), err,

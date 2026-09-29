@@ -3,7 +3,7 @@
 // the app (the first is app/give.html) — same reasoning: a member checking themselves in for a
 // service is not staff, so this never touches the local-first store/repo (sync.js) or a signed-in
 // session, and talks to the server's own /checkin/* routes directly (see server/src/app.js).
-import { h, field, val } from './ui.js';
+import { h, field, val, isNetworkError } from './ui.js';
 import { icon } from './icons.js';
 import { API_URL } from './config.js';
 
@@ -20,8 +20,10 @@ const shell = (...kids) => h('div', { class: 'login-page' }, h('div', { class: '
 const brand = () => h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
   h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
 
-function renderError(message) {
-  root.replaceChildren(shell(brand(), h('h1', {}, "Check-in link not found"), h('p', { class: 'subtitle' }, message)));
+function renderError(message, isNetworkErr) {
+  root.replaceChildren(shell(brand(),
+    h('h1', {}, isNetworkErr ? "Can't reach the server" : 'Check-in link not found'),
+    h('p', { class: 'subtitle' }, isNetworkErr ? 'Check your connection and try again.' : message)));
 }
 
 function renderLoading() {
@@ -41,7 +43,7 @@ async function renderForm(tenantId) {
   renderLoading();
   let info;
   try { info = await api('GET', `/checkin/info?t=${encodeURIComponent(tenantId)}`); }
-  catch (e) { return renderError(e.message); }
+  catch (e) { return renderError(e.message, isNetworkError(e)); }
 
   const err = h('div', { class: 'err', role: 'alert' });
   const f = h('form', { onsubmit: async (e) => {
@@ -51,7 +53,7 @@ async function renderForm(tenantId) {
     try {
       const result = await api('POST', '/checkin', { tenantId, phone: val(f, 'phone') });
       renderSuccess(info.churchName, tenantId, result.name, result.alreadyCheckedIn);
-    } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
+    } catch (ex) { err.textContent = isNetworkError(ex) ? 'Cannot reach the server. Check your connection and try again.' : ex.message; btn.disabled = false; }
   } },
     field('Your phone number', h('input', { name: 'phone', type: 'tel', inputmode: 'tel', placeholder: '024 000 0000', required: true, autofocus: true })),
     err,

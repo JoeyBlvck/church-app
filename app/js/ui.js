@@ -13,6 +13,17 @@ export function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+// A fetch()-level failure — offline, DNS failure, CORS, the server simply not reachable — always
+// throws a TypeError, but its exact wording differs by browser engine: "Failed to fetch" in
+// Chrome/Edge/WebView2 (the Windows desktop build), "Load failed" in Safari/WKWebView (the Mac
+// desktop build), "NetworkError when attempting to fetch resource." in Firefox. Matching on the
+// message text — as this used to do — only ever caught the Chrome wording, so on Mac this class
+// of error slipped through as a generic, unhelpful message instead of "you're offline" (and, in
+// the login form, meant the offline-sign-in fallback never even triggered). Checking the error's
+// TYPE instead of its wording works the same on every engine. Never true for an error `sync.js`'s
+// http() throws for a real server response (a plain Error with a `.status`, even for 4xx/5xx).
+export const isNetworkError = (ex) => ex instanceof TypeError;
+
 // dateKey (below) is the local-calendar-day version of this — today() is defined up here since
 // it's used throughout the file before dateKey's own definition further down, but it delegates
 // to the exact same local Date parts rather than toISOString(), which is UTC and can be a day

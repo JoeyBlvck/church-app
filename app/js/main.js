@@ -1,7 +1,7 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
 import { API_URL, isTauri } from './config.js';
-import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal } from './ui.js';
+import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError } from './ui.js';
 import { icon } from './icons.js';
 
 console.log('The ChurchFlow build: v0.18.0 (forgot password)'); // sanity check: confirms which build the browser actually loaded
@@ -448,7 +448,7 @@ function renderResetPassword(token) {
       toast('Password updated — sign in with your new password.');
       render();
     } catch (ex) {
-      err.textContent = ex.message === 'Failed to fetch' ? 'Cannot reach the server. Try again once you\'re online.' : ex.message;
+      err.textContent = isNetworkError(ex) ? 'Cannot reach the server. Try again once you\'re online.' : ex.message;
       btn.disabled = false;
     }
   } },
@@ -495,7 +495,13 @@ function renderLogin() {
           try {
             await repo.login(email, password);
           } catch (ex) {
-            if (ex.message !== 'Failed to fetch') throw ex; // a real answer from the server (e.g. wrong password) — don't second-guess it
+            // A real fetch()-level network failure is always a TypeError — but its message text
+            // differs by browser engine ("Failed to fetch" in Chrome/Edge/WebView2, "Load failed"
+            // in Safari/WKWebView — which is what the Mac desktop app uses — "NetworkError when
+            // attempting to fetch resource." in Firefox), so check the error's type, not its
+            // wording. Anything else (wrong status code, server-reported error) is a real answer
+            // from the server and shouldn't be second-guessed.
+            if (!isNetworkError(ex)) throw ex;
             await repo.loginOffline(email, password); // couldn't even reach the server — fall back to this device's saved copy, if any
           }
           await sync(); render();
@@ -510,7 +516,7 @@ function renderLogin() {
           toast('Church created — sign in to get started.');
           mode = 'login'; prefillEmail = email; draw();
         }
-      } catch (ex) { err.textContent = ex.message === 'Failed to fetch' ? 'Cannot reach the server. The first sign-in needs internet.' : ex.message; btn.disabled = false; }
+      } catch (ex) { err.textContent = isNetworkError(ex) ? 'Cannot reach the server. The first sign-in needs internet.' : ex.message; btn.disabled = false; }
     } },
       mode === 'register' && [h('label', {}, 'Church name'), h('input', { name: 'church', required: true }), h('label', {}, 'Your name'), h('input', { name: 'name', required: true, autocomplete: 'name' })],
       h('label', {}, 'Email'), emailInput,

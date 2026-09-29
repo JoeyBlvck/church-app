@@ -5,7 +5,7 @@
 // directly (see server/src/app.js). Shares ui.js's plain DOM helpers and style.css's look, so it
 // reads as the same product as the rest of the app, without dragging in anything that assumes a
 // logged-in user.
-import { h, field, val, opts, money } from './ui.js';
+import { h, field, val, opts, money, isNetworkError } from './ui.js';
 import { icon } from './icons.js';
 import { API_URL } from './config.js';
 
@@ -24,8 +24,10 @@ const shell = (...kids) => h('div', { class: 'login-page' }, h('div', { class: '
 const brand = () => h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
   h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
 
-function renderError(message) {
-  root.replaceChildren(shell(brand(), h('h1', {}, 'Giving link not found'), h('p', { class: 'subtitle' }, message)));
+function renderError(message, isNetworkErr) {
+  root.replaceChildren(shell(brand(),
+    h('h1', {}, isNetworkErr ? "Can't reach the server" : 'Giving link not found'),
+    h('p', { class: 'subtitle' }, isNetworkErr ? 'Check your connection and try again.' : message)));
 }
 
 function renderLoading() {
@@ -37,7 +39,7 @@ async function renderForm(tenantId) {
   renderLoading();
   let info;
   try { info = await api('GET', `/give/info?t=${encodeURIComponent(tenantId)}`); }
-  catch (e) { return renderError(e.message); }
+  catch (e) { return renderError(e.message, isNetworkError(e)); }
 
   let amount = QUICK_AMOUNTS[1];
   const amountInput = h('input', { name: 'amount', type: 'number', min: '1', step: '0.01', inputmode: 'decimal', required: true, value: amount });
@@ -63,7 +65,7 @@ async function renderForm(tenantId) {
         donorName: val(f, 'donorName'), donorEmail, donorPhone, callbackUrl,
       });
       location.href = authorizationUrl;
-    } catch (ex) { err.textContent = ex.message; btn.disabled = false; }
+    } catch (ex) { err.textContent = isNetworkError(ex) ? 'Cannot reach the server. Check your connection and try again.' : ex.message; btn.disabled = false; }
   } },
     field('Amount (GHS)', amountInput), quickRow,
     field('Giving towards', h('select', { name: 'purpose' }, opts(PURPOSES))),
@@ -89,7 +91,7 @@ async function renderStatus(reference, attempt = 0) {
   if (attempt === 0) renderLoading();
   let s;
   try { s = await api('GET', `/give/status?ref=${encodeURIComponent(reference)}`); }
-  catch (e) { return renderError(e.message); }
+  catch (e) { return renderError(e.message, isNetworkError(e)); }
 
   if (s.status === 'pending' && attempt < 8) { setTimeout(() => renderStatus(reference, attempt + 1), 2000); return; }
 
