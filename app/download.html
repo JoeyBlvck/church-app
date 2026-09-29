@@ -46,6 +46,21 @@
   .dl-footer a { color:var(--primary); font-weight:600; text-decoration:none; }
   .dl-footer a:hover { text-decoration:underline; }
   .dl-footer p { margin:6px 0; }
+  .dl-footer-links { display:flex; justify-content:center; gap:18px; flex-wrap:wrap; margin-bottom:10px; }
+  .dl-footer-links a { font-weight:600; }
+  .dl-section { max-width:640px; margin:0 auto; padding:8px 20px 44px; border-top:1px solid var(--line); padding-top:40px; }
+  .dl-section h2 { font-size:20px; margin:0 0 16px; color:var(--ink); text-align:center; }
+  .dl-about p { font-size:14.5px; color:var(--mute); line-height:1.6; text-align:center; max-width:560px; margin:0 auto; }
+  .dl-faq-item { border-bottom:1px solid var(--line); }
+  .dl-faq-item:last-child { border-bottom:none; }
+  .dl-faq-item summary { cursor:pointer; font-weight:600; font-size:14.5px; color:var(--ink); padding:12px 4px; list-style:none; }
+  .dl-faq-item summary::-webkit-details-marker { display:none; }
+  .dl-faq-item summary::before { content:'+'; display:inline-block; width:18px; color:var(--primary); font-weight:800; }
+  .dl-faq-item[open] summary::before { content:'\2013'; }
+  .dl-faq-item p { margin:0 0 16px 22px; font-size:13.5px; color:var(--mute); line-height:1.55; }
+  .dl-support { text-align:center; }
+  .dl-support p { font-size:14.5px; color:var(--mute); line-height:1.6; margin:0 0 18px; }
+  .dl-support .dl-btn { max-width:220px; margin:0 auto; }
 </style>
 </head>
 <body class="download-page">
@@ -100,7 +115,43 @@
   </div>
 </section>
 
+<section class="dl-section dl-about" id="about">
+  <h2>About</h2>
+  <p>The ChurchFlow is built by Joey Studios — software made for how churches actually run day to day: taking attendance during a service with no signal in the room, tracking giving and pledges, running ministries, and keeping members' records straight across every device your team uses. It's local-first, so nothing waits on an internet connection to get saved — every device simply syncs up whenever it's back online.</p>
+</section>
+
+<section class="dl-section dl-faq" id="faq">
+  <h2>Frequently asked questions</h2>
+  <details class="dl-faq-item">
+    <summary>Does it work without an internet connection?</summary>
+    <p>Yes — every screen works fully offline on each device. Anything you enter is saved immediately on that device and syncs automatically the next time it's back online.</p>
+  </details>
+  <details class="dl-faq-item">
+    <summary>Is my church's data safe?</summary>
+    <p>Each church's data is kept completely separate, and only your own staff accounts can sign in to it. Giving and finance records are append-only, so a posted entry can never be silently edited or deleted — corrections are always recorded as new, linked entries.</p>
+  </details>
+  <details class="dl-faq-item">
+    <summary>What devices can I use it on?</summary>
+    <p>The ChurchFlow runs as a desktop app for Mac and Windows (downloadable above), and in any modern web browser.</p>
+  </details>
+  <details class="dl-faq-item">
+    <summary>How do updates work?</summary>
+    <p>The desktop app checks for updates automatically while it's open and connected to the internet, and lets you install them with one click — no need to come back to this page and redownload each time.</p>
+  </details>
+  <details class="dl-faq-item">
+    <summary>How do I get help or report a problem?</summary>
+    <p>Reach out any time — see Support below.</p>
+  </details>
+</section>
+
+<section class="dl-section dl-support" id="support">
+  <h2>Support</h2>
+  <p>Have a question, hit a snag, or want to request a feature? Email us and we'll get back to you.</p>
+  <a class="dl-btn" href="mailto:joelmensah40@gmail.com">Email support</a>
+</section>
+
 <footer class="dl-footer">
+  <p class="dl-footer-links"><a href="#about">About</a><a href="#faq">FAQ</a><a href="#support">Support</a></p>
   <p><a href="index.html">Already have an account? Sign in →</a></p>
   <p>Powered by <b>The ChurchFlow</b> · Joey Studios</p>
 </footer>
