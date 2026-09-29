@@ -4,6 +4,13 @@ name: Build desktop app (Mac + Windows)
 # Windows, using GitHub's own hosted runners for each OS — this can't be done from a single
 # machine, since a real macOS build needs a real Mac and a real Windows build needs a real PC.
 #
+# The Mac build targets "universal-apple-darwin" — a single .dmg containing both Apple Silicon
+# (arm64) and Intel (x86_64) binaries lipo'd together — rather than whatever chip the runner
+# itself happens to be. GitHub's macos-latest runners moved to Apple Silicon hardware, so without
+# this the build would silently only run on M-series Macs and fail to even open on an Intel one.
+# That needs both Rust targets installed first (rustTargets below); Windows only ever needs the
+# one it's already building for, so its rustTargets is empty.
+#
 # Manual only for now (Actions tab → "Build desktop app (Mac + Windows)" → Run workflow),
 # so it doesn't burn CI minutes on every push while this is still early / unsigned. Once
 # this is ready for real users, this can be switched to trigger on version tags instead.
@@ -18,8 +25,12 @@ jobs:
         include:
           - platform: macos-latest
             label: mac
+            rustTargets: aarch64-apple-darwin,x86_64-apple-darwin
+            tauriArgs: --verbose --target universal-apple-darwin
           - platform: windows-latest
             label: windows
+            rustTargets: ''
+            tauriArgs: --verbose
     runs-on: ${{ matrix.platform }}
     steps:
       - name: Check out the repo
@@ -27,6 +38,8 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rustTargets }}
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
@@ -47,4 +60,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           uploadWorkflowArtifacts: true
-          args: --verbose
+          args: ${{ matrix.tauriArgs }}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { sendPasswordResetEmail, EmailConfigError } from '../src/email.js';
+import { sendPasswordResetEmail, sendWelcomeEmail, EmailConfigError } from '../src/email.js';
 
 const prevKey = process.env.BREVO_API_KEY, prevFrom = process.env.EMAIL_FROM;
 test.before(() => { process.env.BREVO_API_KEY = 'test-key'; process.env.EMAIL_FROM = 'noreply@x.org'; });
@@ -74,4 +74,43 @@ test('sendPasswordResetEmail: throws EmailConfigError when Brevo rejects the req
     ),
     EmailConfigError,
   );
+});
+
+test('sendWelcomeEmail: posts to Brevo with the setup link, church name and owner name', async () => {
+  const sent = {};
+  await sendWelcomeEmail(
+    { to: 'kwame@x.org', name: 'Kwame', churchName: 'New Hope', setupUrl: 'https://app.test/?resetToken=abc123' },
+    { fetchImpl: fakeFetch(sent) },
+  );
+  assert.match(sent.url, /brevo\.com/);
+  assert.equal(sent.body.to[0].email, 'kwame@x.org');
+  assert.match(sent.body.subject, /New Hope/);
+  assert.ok(sent.body.textContent.includes('https://app.test/?resetToken=abc123'));
+  assert.ok(sent.body.htmlContent.includes('https://app.test/?resetToken=abc123'));
+  assert.ok(sent.body.htmlContent.includes('New Hope'));
+  assert.ok(sent.body.htmlContent.includes('Kwame'));
+});
+
+test('sendWelcomeEmail: escapes the church name in the HTML body', async () => {
+  const sent = {};
+  await sendWelcomeEmail(
+    { to: 'x@x.org', name: 'X', churchName: '<b>Evil</b> Chapel', setupUrl: 'https://app.test/?resetToken=abc' },
+    { fetchImpl: fakeFetch(sent) },
+  );
+  assert.ok(!sent.body.htmlContent.includes('<b>Evil</b>'));
+  assert.ok(sent.body.htmlContent.includes('&lt;b&gt;Evil&lt;/b&gt;'));
+});
+
+test('sendWelcomeEmail: throws EmailConfigError when Brevo is not configured', async () => {
+  const prevK = process.env.BREVO_API_KEY, prevF = process.env.EMAIL_FROM;
+  delete process.env.BREVO_API_KEY; delete process.env.EMAIL_FROM;
+  try {
+    await assert.rejects(
+      () => sendWelcomeEmail({ to: 'x@x.org', name: 'X', churchName: 'X Chapel', setupUrl: 'https://app.test/?resetToken=abc' }),
+      EmailConfigError,
+    );
+  } finally {
+    if (prevK !== undefined) process.env.BREVO_API_KEY = prevK; else delete process.env.BREVO_API_KEY;
+    if (prevF !== undefined) process.env.EMAIL_FROM = prevF; else delete process.env.EMAIL_FROM;
+  }
 });

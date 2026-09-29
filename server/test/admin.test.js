@@ -4,10 +4,10 @@ import { openDb } from '../src/db.js';
 import { createApp } from '../src/app.js';
 import { ensureSuperAdmin } from '../src/platformAdmin.js';
 
-async function setup() {
+async function setup(createAppOpts = {}) {
   const db = openDb();
   ensureSuperAdmin(db, 'root@churchmanager.app', 'super-secret-1');
-  const server = createApp(db, { secret: 't' });
+  const server = createApp(db, { secret: 't', appUrl: 'https://app.test', ...createAppOpts });
   await new Promise((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, body, token) => {
@@ -124,7 +124,6 @@ test('platform admin: can view (read-only) a church\'s staff accounts, and delet
   const names = staff.body.staff.map((s) => s.name).sort();
   assert.deepEqual(names, ['Ama', 'Kofi']);
   assert.equal(staff.body.staff.find((s) => s.name === 'Ama').role, 'owner');
-  // read-only: this console has no route that edits a church's own staff accounts
   assert.equal((await call('GET', '/admin/tenants/staff?id=no-such-id', null, token)).status, 404);
 
   await call('POST', '/sync/push', { changes: [{ collection: 'members', id: 'm1', data: { name: 'A Member' }, updatedAt: 1 }] }, a.token);
@@ -155,5 +154,84 @@ test('ensureSuperAdmin: re-running with a new password rotates it; missing email
   assert.equal((await call('POST', '/admin/login', { email: 'root@churchmanager.app', password: 'second-password' })).status, 200);
 
   assert.throws(() => ensureSuperAdmin(db, 'x@y.com', 'short'));
+  server.close();
+});
+
+test('platform admin: can create a new church (owner gets no password, only a setup email/link)', async () => {
+  let lastEmail = null;
+  const sendWelcomeEmailImpl = async (msg) => { lastEmail = msg; };
+  const { server, call } = await setup({ sendWelcomeEmailImpl });
+  const { token } = (await call('POST', '/admin/login', { email: 'root@churchmanager.app', password: 'super-secret-1' })).body;
+
+  const created = await call('POST', '/admin/tenants/create', { churchName: 'New Hope', ownerName: 'Kwame', ownerEmail: 'kwame@x.org' }, token);
+  assert.equal(created.status, 200);
+  assert.equal(created.body.emailSent, true);
+  assert.ok(created.body.setupUrl.startsWith('https://app.test/?resetToken='));
+  assert.equal(lastEmail.to, 'kwame@x.org');
+  assert.equal(lastEmail.churchName, 'New Hope');
+
+  // the owner can't sign in with anything until they use the emailed link
+  assert.equal((await call('POST', '/auth/login', { email: 'kwame@x.org', password: 'whatever12' })).status, 401);
+  const setupToken = new URL(created.body.setupUrl).searchParams.get('resetToken');
+  const reset = await call('POST', '/auth/reset-password', { token: setupToken, password: 'chosenpassword1' });
+  assert.equal(reset.status, 200);
+  const login = await call('POST', '/auth/login', { email: 'kwame@x.org', password: 'chosenpassword1' });
+  assert.equal(login.status, 200);
+  assert.equal(login.body.user.role, 'owner');
+
+  // the church now shows up in the tenant list like any other
+  const tenants = (await call('GET', '/admin/tenants', null, token)).body;
+  assert.ok(tenants.some((t) => t.name === 'New Hope'));
+
+  // validation + duplicate email
+  assert.equal((await call('POST', '/admin/tenants/create', { churchName: '', ownerName: 'X', ownerEmail: 'x@x.org' }, token)).status, 400);
+  assert.equal((await call('POST', '/admin/tenants/create', { churchName: 'Dup', ownerName: 'X', ownerEmail: 'kwame@x.org' }, token)).status, 409);
+  server.close();
+});
+
+test('platform admin: can add and edit a church\'s non-owner staff, but never the owner', async () => {
+  const { server, call } = await setup();
+  const a = (await call('POST', '/auth/register-church', { churchName: 'Grace Chapel', name: 'Ama', email: 'a@x.org', password: 'password1' })).body;
+  await call('POST', '/sync/push', { changes: [{ collection: 'ministries', id: 'min1', data: { id: 'min1', name: 'Youth' }, updatedAt: 1 }] }, a.token);
+  const { token } = (await call('POST', '/admin/login', { email: 'root@churchmanager.app', password: 'super-secret-1' })).body;
+  const grace = (await call('GET', '/admin/tenants', null, token)).body.find((t) => t.name === 'Grace Chapel');
+
+  const mins = await call('GET', `/admin/tenants/ministries?id=${grace.id}`, null, token);
+  assert.equal(mins.status, 200);
+  assert.deepEqual(mins.body, [{ id: 'min1', name: 'Youth' }]);
+
+  // create a secretary
+  const created = await call('POST', '/admin/tenants/staff/create', { tenantId: grace.id, name: 'Kofi', email: 'kofi@x.org', password: 'password1', role: 'secretary' }, token);
+  assert.equal(created.status, 200);
+  assert.equal((await call('POST', '/auth/login', { email: 'kofi@x.org', password: 'password1' })).status, 200);
+
+  // a leader needs a ministry
+  assert.equal((await call('POST', '/admin/tenants/staff/create', { tenantId: grace.id, name: 'L', email: 'l@x.org', password: 'password1', role: 'leader' }, token)).status, 400);
+  const leader = await call('POST', '/admin/tenants/staff/create', { tenantId: grace.id, name: 'Leader', email: 'leader@x.org', password: 'password1', role: 'leader', ministryIds: ['min1'] }, token);
+  assert.equal(leader.status, 200);
+
+  // can't create another owner, and duplicate email is rejected
+  assert.equal((await call('POST', '/admin/tenants/staff/create', { tenantId: grace.id, name: 'X', email: 'x@x.org', password: 'password1', role: 'owner' }, token)).status, 400);
+  assert.equal((await call('POST', '/admin/tenants/staff/create', { tenantId: grace.id, name: 'X', email: 'kofi@x.org', password: 'password1', role: 'secretary' }, token)).status, 409);
+
+  // edit: change role, reset password, then deactivate
+  const kofiId = (await call('GET', `/admin/tenants/staff?id=${grace.id}`, null, token)).body.staff.find((s) => s.name === 'Kofi').id;
+  const upd = await call('POST', '/admin/tenants/staff/update', { tenantId: grace.id, id: kofiId, role: 'treasurer', password: 'newpassword2' }, token);
+  assert.equal(upd.status, 200);
+  assert.equal((await call('POST', '/auth/login', { email: 'kofi@x.org', password: 'newpassword2' })).status, 200);
+  assert.equal((await call('GET', `/admin/tenants/staff?id=${grace.id}`, null, token)).body.staff.find((s) => s.id === kofiId).role, 'treasurer');
+
+  const deact = await call('POST', '/admin/tenants/staff/update', { tenantId: grace.id, id: kofiId, active: false }, token);
+  assert.equal(deact.status, 200);
+  assert.equal((await call('POST', '/auth/login', { email: 'kofi@x.org', password: 'newpassword2' })).status, 401);
+
+  // the owner account is untouchable from here
+  const amaId = (await call('GET', `/admin/tenants/staff?id=${grace.id}`, null, token)).body.staff.find((s) => s.name === 'Ama').id;
+  const ownerEdit = await call('POST', '/admin/tenants/staff/update', { tenantId: grace.id, id: amaId, active: false }, token);
+  assert.equal(ownerEdit.status, 403);
+
+  // 404s: wrong church, no such user
+  assert.equal((await call('POST', '/admin/tenants/staff/create', { tenantId: 'no-such-id', name: 'X', email: 'x2@x.org', password: 'password1', role: 'secretary' }, token)).status, 404);
+  assert.equal((await call('POST', '/admin/tenants/staff/update', { tenantId: grace.id, id: 'no-such-id' }, token)).status, 404);
   server.close();
 });

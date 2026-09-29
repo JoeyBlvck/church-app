@@ -3,12 +3,15 @@
 // its sidebar links here (though its own nav links back to it — see renderConsole), and its
 // token/login are entirely separate from any church's own users (server/src/app.js's
 // `authAdmin`, server/src/platformAdmin.js). Scoped to each church's basic profile/account info
-// (name, plan, logo/motto/location/district/region, SMS sender setup), who has a login there
-// (read-only — name/email/role/active, never used to create/edit/deactivate one), and
-// church-level actions (suspend/reactivate, delete the whole church) — it never reads or writes
-// a church's own members, finance, attendance, or ministry data, and never edits a church's own
-// staff accounts (that stays with that church's own owner/admin, under Settings).
-import { h, field, val, opts, byName, fmtDate, modal, toast, photoPicker } from './ui.js';
+// (name, plan, logo/motto/location/district/region, SMS sender setup), its non-owner staff
+// accounts (create, edit role/ministry, reset password, deactivate — see staffForm below), and
+// church-level actions (create a new church, suspend/reactivate, delete the whole church). It
+// never reads or writes a church's own members, finance, attendance, or ministry data (beyond
+// the {id, name} list needed for the leader-ministry dropdown) — and the owner account itself is
+// still untouchable here, created once at church creation and never edited from this console,
+// the same line server/src/app.js's own POST /users/update already draws for a church's own
+// admins.
+import { h, field, val, opts, byName, fmtDate, modal, confirmDialog, toast, photoPicker } from './ui.js';
 import { icon } from './icons.js';
 import { API_URL } from './config.js';
 
@@ -66,6 +69,48 @@ function renderLogin() {
 const PLANS = ['trial', 'active', 'suspended'];
 const GHANA_REGIONS = ['Ahafo', 'Ashanti', 'Bono', 'Bono East', 'Central', 'Eastern', 'Greater Accra', 'North East',
   'Northern', 'Oti', 'Savannah', 'Upper East', 'Upper West', 'Volta', 'Western', 'Western North'];
+
+// Creates a brand-new church + owner account (POST /admin/tenants/create). Deliberately asks for
+// nothing more than the owner's name and email — no password field here at all: the server sets
+// one at random and emails the owner a one-time "choose your password" link instead (see
+// showSetupLink below), so this console is never the thing generating or displaying a real
+// password on someone else's behalf.
+function addChurchForm(refresh) {
+  const err = h('div', { class: 'err' });
+  const f = h('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api('POST', '/admin/tenants/create', {
+        churchName: val(f, 'churchName'), ownerName: val(f, 'ownerName'), ownerEmail: val(f, 'ownerEmail'),
+      });
+      dlg.close(); refresh(); showSetupLink(r);
+    } catch (ex) { err.textContent = ex.message; }
+  } },
+    field('Church name', h('input', { name: 'churchName', required: true })),
+    field('Owner name', h('input', { name: 'ownerName', required: true })),
+    field('Owner email', h('input', { name: 'ownerEmail', type: 'email', required: true })), err,
+    h('p', { class: 'hint' }, "The owner gets an email to set their own password — you never see or choose it."),
+    h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Create church')));
+  const dlg = modal('Add a church', f);
+}
+
+// Shown right after a church is created — confirms the setup email went out, and always includes
+// the raw link too (not just when the email fails) so there's a manual fallback if it bounces,
+// lands in spam, or BREVO_API_KEY/EMAIL_FROM isn't set on the server at all.
+function showSetupLink(r) {
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(r.setupUrl); toast('Link copied'); }
+    catch { toast('Could not copy — select and copy it manually', 'err'); }
+  };
+  modal('Church created', h('div', {},
+    r.emailSent
+      ? h('p', {}, 'A setup email was sent to ', h('b', {}, r.ownerEmail), '.')
+      : h('p', { class: 'err' }, `Couldn't send the setup email to ${r.ownerEmail} — share this link with them yourself:`),
+    r.setupUrl
+      ? h('div', { class: 'row' }, h('input', { readonly: true, value: r.setupUrl, onclick: (e) => e.target.select() }),
+          h('button', { type: 'button', class: 'btn ghost', onclick: copy }, 'Copy link'))
+      : h('p', { class: 'hint' }, 'No setup link could be generated — check the server has APP_URL set.')));
+}
 
 // A destructive action, gated behind typing the church's own name back — a plain yes/no confirm
 // is too easy to click through for something this permanent (every member/finance/attendance/
@@ -138,18 +183,54 @@ function editTenant(t, refresh) {
         catch (ex) { toast(ex.message, 'err'); }
       } }, 'Remove')));
 
-  // Read-only — support/troubleshooting only. This console still never creates, deactivates or
-  // edits a church's own staff accounts; that stays with that church's own owner/admin.
-  const staffCard = h('div', { class: 'card' }, h('b', {}, 'Staff accounts'), h('p', { class: 'hint' }, 'Loading…'));
-  api('GET', `/admin/tenants/staff?id=${t.id}`).then((r) => {
-    staffCard.replaceChildren(h('b', {}, 'Staff accounts'),
+  // Add/edit non-owner staff from this console — same rules server-side as that church's own
+  // Settings > Staff page (POST /admin/tenants/staff/create + .../staff/update), just reachable
+  // by the platform operator too. The owner row stays non-clickable, same as it is in the
+  // church's own staff list (app/js/views/people.js's staffView) — fixing an owner's own login
+  // is a password-reset-email matter, never something edited here.
+  const staffCard = h('div', { class: 'card' }, h('b', {}, 'Staff & leaders'), h('p', { class: 'hint' }, 'Loading…'));
+  Promise.all([api('GET', `/admin/tenants/staff?id=${t.id}`), api('GET', `/admin/tenants/ministries?id=${t.id}`)]).then(([r, mins]) => {
+    const mName = Object.fromEntries(mins.map((m) => [m.id, m.name]));
+    const ROLE_HELP = { admin: 'Everything except the owner account', secretary: 'Members, attendance, announcements', treasurer: 'Finance and pledges', leader: 'Only their own ministry' };
+
+    const staffForm = (u = {}) => {
+      const roleSel = h('select', { name: 'role', onchange: () => (minBox.hidden = roleSel.value !== 'leader') }, opts(Object.keys(ROLE_HELP), u.role ?? 'leader'));
+      const minSel = h('select', { name: 'ministry' }, opts(mins.slice().sort(byName).map((m) => [m.id, m.name]), u.ministryIds?.[0]));
+      const minBox = field('Ministry they lead', minSel);
+      minBox.hidden = (u.role ?? 'leader') !== 'leader';
+      const sf = h('form', { onsubmit: async (e) => {
+        e.preventDefault();
+        try {
+          const role = val(sf, 'role'), ministryIds = role === 'leader' ? [val(sf, 'ministry')].filter(Boolean) : [];
+          if (role === 'leader' && !ministryIds.length) return toast('This church needs a ministry first — add one before assigning a leader.', 'err');
+          if (u.id) await api('POST', '/admin/tenants/staff/update', { tenantId: t.id, id: u.id, role, ministryIds, password: val(sf, 'password') || undefined });
+          else await api('POST', '/admin/tenants/staff/create', { tenantId: t.id, name: val(sf, 'name'), email: val(sf, 'email'), password: val(sf, 'password'), role, ministryIds });
+          sDlg.close(); toast('Saved'); dlg.close(); refresh();
+        } catch (ex) { toast(ex.message, 'err'); }
+      } },
+        h('div', { class: 'row' }, !u.id && field('Name', h('input', { name: 'name', required: true })), !u.id && field('Email (login)', h('input', { name: 'email', type: 'email', required: true })),
+          field(u.id ? 'New password (leave blank to keep)' : 'Temporary password', h('input', { name: 'password', minlength: 8, required: !u.id, autocomplete: 'new-password' }), '8+ characters'),
+          field('Role', roleSel, 'Admin sees everything at this church; leaders see only their ministry.'), minBox),
+        h('p', { class: 'actions' }, h('button', { class: 'btn' }, u.id ? 'Save' : 'Create account'),
+          u.id && h('button', { type: 'button', class: 'btn del', onclick: async () => {
+            if (await confirmDialog(`Deactivate ${u.name}? They are signed out immediately.`, 'Deactivate')) {
+              try { await api('POST', '/admin/tenants/staff/update', { tenantId: t.id, id: u.id, active: false }); sDlg.close(); toast('Deactivated'); dlg.close(); refresh(); }
+              catch (ex) { toast(ex.message, 'err'); }
+            }
+          } }, icon('trash', { size: 15 }), 'Deactivate')));
+      const sDlg = modal(u.id ? `Edit ${u.name}` : 'New staff account', sf);
+    };
+
+    staffCard.replaceChildren(h('b', {}, 'Staff & leaders'),
+      h('p', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => staffForm() }, icon('plus', { size: 15 }), 'Add staff')),
       r.staff.length
-        ? h('table', {}, h('thead', {}, h('tr', {}, ['Name', 'Email', 'Role', 'Status'].map((c) => h('th', {}, c)))),
-            h('tbody', {}, r.staff.map((s) => h('tr', {}, h('td', {}, s.name), h('td', {}, s.email),
-              h('td', {}, h('span', { class: 'pill' }, s.role)),
+        ? h('table', {}, h('thead', {}, h('tr', {}, ['Name', 'Email', 'Role', 'Ministry', 'Status'].map((c) => h('th', {}, c)))),
+            h('tbody', {}, r.staff.map((s) => h('tr', { class: s.role === 'owner' ? '' : 'click', onclick: s.role === 'owner' ? null : () => staffForm(s) },
+              h('td', {}, s.name), h('td', {}, s.email), h('td', {}, h('span', { class: 'pill' }, s.role)),
+              h('td', {}, (s.ministryIds ?? []).map((i) => mName[i]).filter(Boolean).join(', ')),
               h('td', {}, s.active ? h('span', { class: 'pill good' }, 'Active') : h('span', { class: 'pill bad' }, 'Deactivated'))))))
         : h('p', { class: 'hint' }, 'No staff accounts yet.'));
-  }).catch((ex) => staffCard.replaceChildren(h('b', {}, 'Staff accounts'), h('p', { class: 'err' }, ex.message)));
+  }).catch((ex) => staffCard.replaceChildren(h('b', {}, 'Staff & leaders'), h('p', { class: 'err' }, ex.message)));
 
   const dangerCard = h('div', { class: 'card' }, h('b', {}, 'Danger zone'),
     h('p', { class: 'hint' }, 'Permanently delete this church and everything in it — members, finance, attendance, ministries and every staff login.'),
@@ -191,7 +272,7 @@ function renderConsole(tenants) {
         h('button', { onclick: () => { setToken(null); render(); } }, h('span', { class: 'ico' }, icon('signout')), h('span', {}, 'Sign out')))),
     h('main', {},
       h('div', { class: 'bar top' }, h('div', { class: 'status', role: 'status' }, `${tenants.length} church${tenants.length === 1 ? '' : 'es'} on the platform`), q),
-      h('div', { class: 'bar' }, h('h2', {}, 'Churches')),
+      h('div', { class: 'bar' }, h('h2', {}, 'Churches'), h('button', { class: 'btn', onclick: () => addChurchForm(refresh) }, icon('plus', { size: 15 }), 'Add church')),
       h('div', { class: 'card' }, h('table', {}, h('thead', {}, h('tr', {}, ['Church', 'Plan', 'Members', 'Staff', 'SMS', 'Created'].map((t) => h('th', {}, t)))), body)))));
 }
 

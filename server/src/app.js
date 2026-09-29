@@ -5,7 +5,7 @@ import { COLLECTIONS, canRead, canWrite, ministryOf } from './permissions.js';
 import { normalizeGhanaPhone, sendSms, SmsConfigError } from './sms.js';
 import { initializeTransaction, verifyTransaction, verifySignature, PaystackConfigError } from './paystack.js';
 import { sendTemplateMessage, sendTextMessage, verifyWebhookChallenge, parseInboundMessage, WhatsAppConfigError } from './whatsapp.js';
-import { sendPasswordResetEmail } from './email.js';
+import { sendPasswordResetEmail, sendWelcomeEmail } from './email.js';
 
 const SENDER_ID_RE = /^[A-Za-z0-9 ]{3,11}$/;
 const GIVING_PURPOSES = ['tithe', 'offering', 'welfare', 'donation'];
@@ -36,7 +36,7 @@ const RATE_LIMITED_ROUTES = new Map([
   ['POST /auth/reset-password', { windowMs: 60_000, max: 10 }],
 ]);
 
-export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', sendPasswordResetEmailImpl } = {}) {
+export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', sendPasswordResetEmailImpl, sendWelcomeEmailImpl } = {}) {
   // In-memory and per-app-instance on purpose: this runs as a single Node process (see
   // server/src/index.js), so there's no shared store to coordinate with — if this is ever scaled
   // to more than one instance, this needs to move to something shared (e.g. Redis) instead, or a
@@ -160,6 +160,19 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
     return { id: row.id, email: row.email, name: row.name };
   }
 
+  // Shared by POST /auth/request-password-reset and the platform admin console's "add church"
+  // flow (POST /admin/tenants/create below): issues a fresh one-time token for a user to
+  // set/reset their password, replacing any still-live one for that same account first so at
+  // most one is ever valid.
+  function issueResetToken(userId) {
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(userId);
+    db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?,?,?)')
+      .run(tokenHash, userId, Date.now() + RESET_TOKEN_TTL_MS);
+    return rawToken;
+  }
+
   // Turns a Paystack-confirmed payment into an ordinary entry in the same append-only ledger
   // everything else uses (compare finance.js's own `post` helper) — called from both GET
   // /give/status (the donor's own browser, redirected back after checkout) and POST
@@ -238,11 +251,7 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       const email = (body.email ?? '').trim().toLowerCase();
       const row = email && q.tenantByEmail.get(email);
       if (row && row.active) {
-        const rawToken = randomBytes(32).toString('hex');
-        const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-        db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(row.id); // at most one live link per account
-        db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?,?,?)')
-          .run(tokenHash, row.id, Date.now() + RESET_TOKEN_TTL_MS);
+        const rawToken = issueResetToken(row.id); // at most one live link per account
         if (!appUrl) {
           console.error('Cannot send password reset email: APP_URL is not set.');
         } else {
@@ -698,9 +707,10 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
     },
 
     // ---- platform admin console (app/admin.html): separate login (server/src/platformAdmin.js
-    // seeds it from env vars — no public sign-up), scoped to each church's basic profile and
-    // account info only. It never touches a church's members/finance/attendance/staff records —
-    // those stay reachable only through that church's own accounts and permissions.js.
+    // seeds it from env vars — no public sign-up). Scoped to each church's basic profile/account
+    // info, and (as of the staff/create + staff/update routes further down) its non-owner staff
+    // accounts — never a church's members, finance, or attendance, which stay reachable only
+    // through that church's own accounts and permissions.js.
     'POST /admin/login': (req, body) => {
       const row = q.platformAdminByEmail.get((body.email ?? '').toLowerCase());
       if (!row || !verifyPassword(body.password ?? '', row.pass_hash)) throw new HttpError(401, 'invalid credentials');
@@ -746,9 +756,10 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       return { ok: true };
     },
 
-    // Read-only — who has a login at this church, and what role/ministry they're scoped to.
-    // Support/troubleshooting only: this console still never edits a church's own staff accounts
-    // (create/deactivate/reset password stays with that church's own owner/admin, under Settings).
+    // Who has a login at this church, and what role/ministry they're scoped to — paired with
+    // POST /admin/tenants/staff/create and .../staff/update further down for adding/editing
+    // non-owner staff from this console. The owner account is still never editable here — it's
+    // only ever created once, at church creation (POST /admin/tenants/create below).
     'GET /admin/tenants/staff': (req, _b, url) => {
       authAdmin(req);
       const t = q.tenantById.get(url.searchParams.get('id') ?? '');
@@ -803,6 +814,84 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       if (!SENDER_ID_RE.test(senderId)) throw new HttpError(400, 'Sender ID must be 3-11 letters/numbers');
       q.setSmsConfig.run(apiKey, senderId, t.id);
       return { ok: true, configured: true };
+    },
+
+    // Creates a brand-new church + its owner account — the admin-console equivalent of the
+    // public "Register a new church" flow (POST /auth/register-church above), just started by
+    // the platform operator instead of the church itself. The owner is never given a password
+    // from here: it's set to something random and unusable, and they're emailed the same kind of
+    // one-time "choose your password" link a forgotten-password request sends (issueResetToken +
+    // email.js's sendWelcomeEmail) — so this console never has to generate, show, or type a real
+    // password on anyone's behalf. setupUrl is always returned, not just on email failure, so the
+    // operator has a fallback to share by hand if the email bounces or lands in spam.
+    'POST /admin/tenants/create': async (req, body) => {
+      authAdmin(req);
+      const churchName = (body.churchName ?? '').trim();
+      const ownerName = (body.ownerName ?? '').trim();
+      const ownerEmail = (body.ownerEmail ?? '').trim().toLowerCase();
+      if (!churchName || !ownerName || !ownerEmail) throw new HttpError(400, 'churchName, ownerName and ownerEmail are required');
+      if (q.tenantByEmail.get(ownerEmail)) throw new HttpError(409, 'email in use');
+      const tid = randomUUID(), uid = randomUUID();
+      q.insTenant.run(tid, churchName, Date.now());
+      q.insUser.run(uid, tid, ownerEmail, ownerName, hashPassword(randomBytes(24).toString('hex')), 'owner', '[]');
+      let emailSent = false, setupUrl = null;
+      if (appUrl) {
+        setupUrl = `${appUrl}/?resetToken=${issueResetToken(uid)}`;
+        const send = sendWelcomeEmailImpl ?? sendWelcomeEmail;
+        try { await send({ to: ownerEmail, name: ownerName, churchName, setupUrl }); emailSent = true; }
+        catch (e) { console.error('Could not send welcome email:', e.message); }
+      } else {
+        console.error('Cannot send welcome email: APP_URL is not set.');
+      }
+      return { id: tid, ownerEmail, setupUrl, emailSent };
+    },
+
+    // Ministries for the leader-role dropdown when adding/editing staff below — just {id, name},
+    // the same narrow shape the public giving page already gets (q.publicMinistries), never a
+    // church's full ministry records.
+    'GET /admin/tenants/ministries': (req, _b, url) => {
+      authAdmin(req);
+      const t = q.tenantById.get(url.searchParams.get('id') ?? '');
+      if (!t) throw new HttpError(404, 'no such church');
+      return q.publicMinistries.all(t.id).map((r) => { const d = JSON.parse(r.data); return { id: d.id, name: d.name }; });
+    },
+
+    // Creates a staff/leader account for a church from the admin console — same shape and rules
+    // as that church's own POST /users (under Settings), just reachable by the platform operator
+    // too. Can never create another 'owner' — ROLES excludes it here exactly like it does there.
+    'POST /admin/tenants/staff/create': (req, body) => {
+      authAdmin(req);
+      const t = q.tenantById.get(body.tenantId ?? '');
+      if (!t) throw new HttpError(404, 'no such church');
+      if (!ROLES.includes(body.role)) throw new HttpError(400, 'bad role');
+      if (body.role === 'leader' && !(body.ministryIds?.length)) throw new HttpError(400, 'leader needs ministryIds');
+      if (!body.email || !body.name || (body.password ?? '').length < 8) throw new HttpError(400, 'name, email and 8+ char password required');
+      if (q.tenantByEmail.get(body.email.toLowerCase())) throw new HttpError(409, 'email in use');
+      const id = randomUUID();
+      q.insUser.run(id, t.id, body.email.toLowerCase(), body.name, hashPassword(body.password), body.role, JSON.stringify(body.ministryIds ?? []));
+      return { id };
+    },
+
+    // Edits a staff account from the admin console — same rules as that church's own POST
+    // /users/update, just reachable by the platform operator too. The owner account is
+    // untouchable from here, same as it already is from a church's own Settings: fixing an
+    // owner's own login stays a password-reset-email matter, never something typed in for them.
+    'POST /admin/tenants/staff/update': (req, body) => {
+      authAdmin(req);
+      const t = q.tenantById.get(body.tenantId ?? '');
+      if (!t) throw new HttpError(404, 'no such church');
+      const row = db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').get(body.id ?? '', t.id);
+      if (!row) throw new HttpError(404, 'no such user');
+      if (row.role === 'owner') throw new HttpError(403, 'the owner account cannot be changed from the admin console');
+      const role = body.role ?? row.role;
+      if (!ROLES.includes(role)) throw new HttpError(400, 'bad role');
+      const ministryIds = body.ministryIds ?? JSON.parse(row.ministry_ids);
+      if (role === 'leader' && !ministryIds.length) throw new HttpError(400, 'leader needs ministryIds');
+      if (body.password != null && body.password.length < 8) throw new HttpError(400, '8+ char password required');
+      db.prepare('UPDATE users SET role = ?, ministry_ids = ?, active = ?, pass_hash = ? WHERE id = ?').run(
+        role, JSON.stringify(role === 'leader' ? ministryIds : []), body.active === false ? 0 : 1,
+        body.password ? hashPassword(body.password) : row.pass_hash, row.id);
+      return { ok: true };
     },
 
     // Client -> server. Optimistic concurrency by server-assigned version (seq), not by
