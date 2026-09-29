@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 // module to import cleanly. Nothing under test here touches the DOM.
 globalThis.location = { hostname: 'test', protocol: 'http:' };
 globalThis.localStorage = { getItem: () => null };
-const { isNetworkError } = await import('../js/ui.js');
+const { isNetworkError, attendanceCount } = await import('../js/ui.js');
 
 test('isNetworkError recognizes a fetch()-level network failure regardless of the browser engine’s wording', () => {
   assert.equal(isNetworkError(new TypeError('Failed to fetch')), true);                               // Chrome/Edge/WebView2 — the Windows desktop build
@@ -24,4 +24,10 @@ test('regression: matching on ex.message === "Failed to fetch" missed Safari’s
   const safariNetworkFailure = new TypeError('Load failed');
   assert.equal(oldBuggyCheck(safariNetworkFailure), false); // the bug: a real, genuine network failure went undetected on Safari/WKWebView
   assert.equal(isNetworkError(safariNetworkFailure), true); // the fix: detected by error type, not by browser-specific wording
+});
+
+test('attendanceCount counts Present and Late toward the total, but not Excused or an unmarked/absent person', () => {
+  assert.equal(attendanceCount({ presentIds: ['a', 'b'], lateIds: ['c'], excusedIds: ['d'], extra: 2 }), 5); // 2 present + 1 late + 2 extra — excused (d) not counted
+  assert.equal(attendanceCount({ presentIds: ['a'] }), 1); // old records with no lateIds/excusedIds/extra at all still work
+  assert.equal(attendanceCount({}), 0);
 });

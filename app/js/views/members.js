@@ -157,7 +157,7 @@ export async function membersView(ctx) {
   const printCard = async (m, full) => {
     const [tx, att] = await Promise.all([canSeeGiving ? repo.list('transactions') : [], repo.list('attendance')]);
     const mine = tx.filter((t) => t.memberId === m.id && t.type !== 'expense').sort((a, b) => b.date.localeCompare(a.date) || (b.at ?? 0) - (a.at ?? 0));
-    const attended = att.filter((a) => a.presentIds?.includes(m.id)).sort((a, b) => b.date.localeCompare(a.date));
+    const attended = att.filter((a) => a.presentIds?.includes(m.id) || a.lateIds?.includes(m.id)).sort((a, b) => b.date.localeCompare(a.date));
     const family = m.householdId ? list.filter((x) => x.householdId === m.householdId && x.id !== m.id) : [];
     const cardHead = h('div', { class: 'print-only member-card-head' },
       h('div', { class: 'basic-only' }, pdfHeader(churchName, cs, 'Member Card', null, user.name)),
@@ -230,7 +230,7 @@ export async function membersView(ctx) {
     const [tx, att] = await Promise.all([canSeeGiving ? repo.list('transactions') : [], repo.list('attendance')]);
     const mine = tx.filter((t) => t.memberId === m.id && t.type !== 'expense').sort((a, b) => b.date.localeCompare(a.date) || (b.at ?? 0) - (a.at ?? 0));
     const year = today().slice(0, 4);
-    const attended = att.filter((a) => a.presentIds?.includes(m.id)).sort((a, b) => b.date.localeCompare(a.date));
+    const attended = att.filter((a) => a.presentIds?.includes(m.id) || a.lateIds?.includes(m.id)).sort((a, b) => b.date.localeCompare(a.date));
     const family = m.householdId ? list.filter((x) => x.householdId === m.householdId && x.id !== m.id) : [];
 
     const givingForm = canSeeGiving && h('form', { class: 'row', onsubmit: async (e) => { e.preventDefault();

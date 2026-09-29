@@ -392,6 +392,20 @@ ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7
 .tabs button.on { color:#fff; background:var(--primary); font-weight:650; }
 .tabs button:hover:not(.on) { background:var(--pill); color:var(--ink); }
 .checklist { max-height:280px; overflow:auto; border:1px solid var(--line); border-radius:10px; padding:8px; background:var(--bg-base); }
+/* Take-attendance roster: each person gets three small status buttons (present/late/excused)
+   instead of the plain checkbox this used to be — see attendanceChecklist() in ui.js, shared by
+   attendance.js's own form and ministries.js's identical inline one. Unmarked (none "on") means
+   absent, same meaning an unchecked box had before Late/Excused existed. */
+.att-checklist { display:flex; flex-direction:column; }
+.att-row { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px; border-bottom:1px solid var(--line); }
+.att-row:last-child { border-bottom:0; }
+.att-name { font-size:14px; }
+.att-status-group { display:flex; gap:4px; flex-shrink:0; }
+.att-status { width:26px; height:26px; border-radius:7px; border:1px solid var(--line); background:var(--bg-base); color:var(--mute); font:inherit; font-size:11.5px; font-weight:700; cursor:pointer; }
+.att-status:hover { background:var(--pill); color:var(--ink); }
+.att-status-present.on { background:var(--ok-bg); color:var(--ok); border-color:transparent; }
+.att-status-late.on { background:var(--warn-bg); color:var(--warn-ink); border-color:transparent; }
+.att-status-excused.on { background:color-mix(in srgb, var(--tone-blue) 16%, transparent); color:var(--tone-blue); border-color:transparent; }
 .kv { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-bottom:10px; }
 .feed { padding:9px 0; border-bottom:1px solid var(--line); }
 /* One category section ("Welfare" / "Tithe" / "Donation") in the member "Full details" print —

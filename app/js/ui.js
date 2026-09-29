@@ -76,7 +76,43 @@ export function relTime(d) {
   return `${Math.round(days / 365)} year${Math.round(days / 365) > 1 ? 's' : ''} ago`;
 }
 export const monthKey = (d) => d.slice(0, 7);
-export const attendanceCount = (a) => (a.presentIds?.length ?? 0) + (a.extra ?? 0);
+// Late still means they showed up — just not on time — so it counts toward the attendance
+// total the same as Present. Excused means they did NOT attend (there's just a known reason),
+// so it's deliberately left out of the count, same as an unmarked/absent person.
+export const attendanceCount = (a) => (a.presentIds?.length ?? 0) + (a.lateIds?.length ?? 0) + (a.extra ?? 0);
+
+// The roster widget for taking attendance: each person gets three small status buttons —
+// present / late / excused — instead of the plain checkbox this used to be before Late/Excused
+// existed. Unmarked (none "on") means absent, same meaning an unchecked box had before. Shared
+// between attendance.js's own take-attendance form and ministries.js's identical inline one, so
+// the three-state behaviour (and its little bit of DOM bookkeeping) only lives in one place.
+export function attendanceChecklist(people, rec) {
+  const statusOf = (p) => (rec.presentIds?.includes(p.id) ? 'present' : rec.lateIds?.includes(p.id) ? 'late' : rec.excusedIds?.includes(p.id) ? 'excused' : null);
+  const status = new Map(people.map((p) => [p.id, statusOf(p)]));
+  const STATUS_BTNS = [['present', 'P', 'Present'], ['late', 'L', 'Late'], ['excused', 'E', 'Excused']];
+  let onChange = () => {};
+  const rows = people.map((p) => {
+    const group = h('div', { class: 'att-status-group' });
+    const redraw = () => group.replaceChildren(...STATUS_BTNS.map(([key, short, label]) =>
+      h('button', { type: 'button', class: `att-status att-status-${key}${status.get(p.id) === key ? ' on' : ''}`, title: `Mark ${label.toLowerCase()}`,
+        onclick: () => { status.set(p.id, status.get(p.id) === key ? null : key); redraw(); onChange(); } }, short)));
+    redraw();
+    return { p, redraw, el: h('div', { class: 'att-row' }, h('span', { class: 'att-name' }, p.name), group) };
+  });
+  return {
+    el: h('div', { class: 'checklist att-checklist' }, rows.map((r) => r.el)),
+    onChange: (fn) => { onChange = fn; },
+    filter: (q) => rows.forEach(({ p, el }) => (el.hidden = q && !p.name.toLowerCase().includes(q.toLowerCase()))),
+    markAllShown: () => { rows.forEach(({ p, el, redraw }) => { if (!el.hidden) status.set(p.id, 'present'); redraw(); }); onChange(); },
+    clear: () => { rows.forEach(({ p, redraw }) => { status.set(p.id, null); redraw(); }); onChange(); },
+    counts: () => { const c = { present: 0, late: 0, excused: 0 }; for (const s of status.values()) if (s) c[s]++; return c; },
+    result: () => {
+      const out = { presentIds: [], lateIds: [], excusedIds: [] };
+      for (const [id, s] of status) { if (s === 'present') out.presentIds.push(id); else if (s === 'late') out.lateIds.push(id); else if (s === 'excused') out.excusedIds.push(id); }
+      return out;
+    },
+  };
+}
 // A reversal entry carries the same type/member/ministry as what it cancels but should net
 // against it, not double-count alongside it, wherever transactions are totaled.
 export const signedAmount = (t) => (t.reverses ? -t.amount : t.amount);

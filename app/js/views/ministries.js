@@ -1,4 +1,4 @@
-import { h, field, val, opts, byName, sum, money, today, fmtDate, fmtTime, modal, confirmDialog, toast, empty, monthKey, signedAmount, photoPicker, attendanceCount } from '../ui.js';
+import { h, field, val, opts, byName, sum, money, today, fmtDate, fmtTime, modal, confirmDialog, toast, empty, monthKey, signedAmount, photoPicker, attendanceCount, attendanceChecklist } from '../ui.js';
 import { icon } from '../icons.js';
 import { TYPES, METHODS, post } from './finance.js';
 import { SERVICES } from './attendance.js';
@@ -140,31 +140,34 @@ export async function ministriesView({ repo, user, ministries, members, rerender
     // write rather than hand-constructing what we think just got saved.
     const refreshRecs = async () => { recs.splice(0, recs.length, ...(await repo.list('attendance'))); drawAttendanceList(); };
     const ministryTakeForm = (rec = {}) => {
-      const present = new Set(rec.presentIds ?? []);
-      const boxes = ppl.map((x) => ({ x, el: h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'p', value: x.id, checked: present.has(x.id) }), ' ', x.name) }));
-      const list = h('div', { class: 'checklist' }, boxes.map((b) => b.el));
+      const checklist = attendanceChecklist(ppl, rec);
       const counter = h('span', { class: 'hint' });
-      const recount = () => (counter.textContent = `${list.querySelectorAll('input:checked').length} marked present`);
-      list.addEventListener('change', recount);
+      const recount = () => { const c = checklist.counts(); counter.textContent = `${c.present} present · ${c.late} late · ${c.excused} excused`; };
+      checklist.onChange(recount);
       const svc = h('input', { name: 'service', required: true, value: rec.service ?? SERVICES[0], list: 'ministry-svc-list' });
       const f = h('form', { onsubmit: async (e) => {
         e.preventDefault();
-        const presentIds = [...f.querySelectorAll('input[name=p]:checked')].map((c) => c.value);
-        await repo.save('attendance', { ...rec, date: val(f, 'date'), service: val(f, 'service'), ministryId: m.id, presentIds, extra: Number(val(f, 'extra')) || 0 });
+        const { presentIds, lateIds, excusedIds } = checklist.result();
+        await repo.save('attendance', { ...rec, date: val(f, 'date'), service: val(f, 'service'), ministryId: m.id, presentIds, lateIds, excusedIds, extra: Number(val(f, 'extra')) || 0 });
         dlg3.close(); toast('Attendance saved'); await refreshRecs(); rerender();
       } },
         h('datalist', { id: 'ministry-svc-list' }, SERVICES.map((s) => h('option', { value: s }))),
         h('div', { class: 'row' }, field('Date', h('input', { name: 'date', type: 'date', value: rec.date ?? today(), required: true })), field('Service / meeting', svc),
           field('Extra headcount', h('input', { name: 'extra', type: 'number', min: 0, value: rec.extra ?? 0 }), 'Visitors or children not on the register')),
-        ppl.length ? h('div', {}, counter, list) : empty("Add members to this ministry's roster first to tick them present — or just enter a headcount."),
+        ppl.length ? h('div', {}, counter, checklist.el) : empty("Add members to this ministry's roster first to tick them present — or just enter a headcount."),
         h('p', { class: 'actions' }, h('button', { class: 'btn' }, rec.id ? 'Save changes' : 'Save attendance')));
       const dlg3 = modal(rec.id ? 'Edit attendance' : 'Take attendance', f, { wide: true }); recount();
     };
     const openAttendanceDetail = (r) => {
-      const names = (r.presentIds ?? []).map((id) => memName[id]).filter(Boolean);
+      const presentNames = (r.presentIds ?? []).map((id) => memName[id]).filter(Boolean);
+      const lateNames = (r.lateIds ?? []).map((id) => memName[id]).filter(Boolean);
+      const excusedNames = (r.excusedIds ?? []).map((id) => memName[id]).filter(Boolean);
       const dlg4 = modal(`${r.service} · ${fmtDate(r.date)}`, h('div', {},
-        h('p', { class: 'hint' }, `Total ${attendanceCount(r)} (${names.length} named + ${r.extra ?? 0} extra)`),
-        names.length ? h('p', {}, names.map((n) => h('span', { class: 'pill' }, n))) : empty('No individual names recorded.'),
+        h('p', { class: 'hint' }, `${presentNames.length} present · ${lateNames.length} late · ${excusedNames.length} excused${r.extra ? ` · ${r.extra} extra` : ''}`),
+        presentNames.length ? h('p', {}, presentNames.map((n) => h('span', { class: 'pill good' }, n))) : null,
+        lateNames.length ? h('p', {}, h('b', {}, 'Late: '), lateNames.map((n) => h('span', { class: 'pill warn' }, n))) : null,
+        excusedNames.length ? h('p', {}, h('b', {}, 'Excused: '), excusedNames.map((n) => h('span', { class: 'pill muted' }, n))) : null,
+        !presentNames.length && !lateNames.length && !excusedNames.length ? empty('No individual names recorded.') : null,
         h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: () => { dlg4.close(); ministryTakeForm(r); } }, 'Edit'),
           h('button', { class: 'btn del', onclick: async () => { if (await confirmDialog('Delete this attendance record?')) { await repo.remove('attendance', r.id); dlg4.close(); await refreshRecs(); rerender(); } } }, icon('trash', { size: 15 }), 'Delete'))));
     };

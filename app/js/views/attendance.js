@@ -1,4 +1,4 @@
-import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, barChart, attendanceCount, bulkBar, sum, download, toCsv, pdfHeader } from '../ui.js';
+import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, barChart, attendanceCount, attendanceChecklist, bulkBar, sum, download, toCsv, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { parseCSV } from '../csv.js';
 import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport } from '../importers.js';
@@ -31,37 +31,39 @@ export async function attendanceView({ repo, user, ministries, members, rerender
   let ministryFilter = !isLeader ? initialMinistryId : '';
 
   const takeForm = (rec = {}) => {
-    const present = new Set(rec.presentIds ?? []);
-    const list = h('div', { class: 'checklist' });
-    const boxes = roster.map((m) => ({ m, el: h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'p', value: m.id, checked: present.has(m.id) }), ' ', m.name) }));
+    const checklist = attendanceChecklist(roster, rec);
     const ministrySel = h('select', { name: 'ministryId' }, !isLeader && h('option', { value: '' }, 'Whole church'), opts(ministries.slice().sort(byName).map((m) => [m.id, m.name]), rec.ministryId));
-    const filter = (q) => boxes.forEach(({ m, el }) => (el.hidden = q && !m.name.toLowerCase().includes(q.toLowerCase())));
     const counter = h('span', { class: 'hint' });
-    const recount = () => (counter.textContent = `${list.querySelectorAll('input:checked').length} marked present`);
-    list.append(...boxes.map((b) => b.el)); list.addEventListener('change', recount);
+    const recount = () => { const c = checklist.counts(); counter.textContent = `${c.present} present · ${c.late} late · ${c.excused} excused`; };
+    checklist.onChange(recount);
     const svc = h('input', { name: 'service', required: true, value: rec.service ?? SERVICES[0], list: 'svc-list' });
     const f = h('form', { onsubmit: async (e) => {
       e.preventDefault();
-      const presentIds = [...f.querySelectorAll('input[name=p]:checked')].map((c) => c.value);
-      await repo.save('attendance', { ...rec, date: val(f, 'date'), service: val(f, 'service'), ministryId: val(f, 'ministryId') || undefined, presentIds, extra: Number(val(f, 'extra')) || 0 });
+      const { presentIds, lateIds, excusedIds } = checklist.result();
+      await repo.save('attendance', { ...rec, date: val(f, 'date'), service: val(f, 'service'), ministryId: val(f, 'ministryId') || undefined, presentIds, lateIds, excusedIds, extra: Number(val(f, 'extra')) || 0 });
       dlg.close(); toast('Attendance saved'); rerender();
     } },
       h('datalist', { id: 'svc-list' }, SERVICES.map((s) => h('option', { value: s }))),
       h('div', { class: 'row' }, field('Date', h('input', { name: 'date', type: 'date', value: rec.date ?? today(), required: true })), field('Service / meeting', svc),
         field('For', ministrySel), field('Extra headcount', h('input', { name: 'extra', type: 'number', min: 0, value: rec.extra ?? 0 }), 'Visitors or children not on the register')),
-      h('div', { class: 'filters' }, h('input', { type: 'search', placeholder: 'Find a member…', oninput: (e) => filter(e.target.value) }),
-        h('button', { type: 'button', class: 'btn ghost sm', onclick: () => { boxes.forEach(({ el }) => { if (!el.hidden) el.querySelector('input').checked = true; }); recount(); } }, 'Mark all shown'),
-        h('button', { type: 'button', class: 'btn ghost sm', onclick: () => { boxes.forEach(({ el }) => (el.querySelector('input').checked = false)); recount(); } }, 'Clear'), counter),
-      roster.length ? list : empty('Add members first to tick them present — or just enter a headcount.'),
+      h('div', { class: 'filters' }, h('input', { type: 'search', placeholder: 'Find a member…', oninput: (e) => checklist.filter(e.target.value) }),
+        h('button', { type: 'button', class: 'btn ghost sm', onclick: checklist.markAllShown }, 'Mark all shown'),
+        h('button', { type: 'button', class: 'btn ghost sm', onclick: checklist.clear }, 'Clear'), counter),
+      roster.length ? checklist.el : empty('Add members first to tick them present — or just enter a headcount.'),
       h('p', { class: 'actions' }, h('button', { class: 'btn' }, rec.id ? 'Save changes' : 'Save attendance')));
     const dlg = modal(rec.id ? 'Edit attendance' : 'Take attendance', f, { wide: true }); recount();
   };
 
   const openDetail = (r) => {
-    const names = roster.concat(members.filter((m) => m.status === 'inactive' || m.status === 'deceased')).filter((m) => r.presentIds?.includes(m.id)).map((m) => m.name);
+    const allMembers = roster.concat(members.filter((m) => m.status === 'inactive' || m.status === 'deceased'));
+    const namesOf = (ids) => allMembers.filter((m) => ids?.includes(m.id)).map((m) => m.name);
+    const presentNames = namesOf(r.presentIds), lateNames = namesOf(r.lateIds), excusedNames = namesOf(r.excusedIds);
     const dlg = modal(`${r.service} · ${fmtDate(r.date)}`, h('div', {},
-      h('p', { class: 'hint' }, `${r.ministryId ? mName[r.ministryId] ?? 'Ministry' : 'Whole church'} · total ${attendanceCount(r)} (${names.length} named + ${r.extra ?? 0} extra)`),
-      names.length ? h('p', {}, names.map((n) => h('span', { class: 'pill' }, n))) : empty('No individual names recorded.'),
+      h('p', { class: 'hint' }, `${r.ministryId ? mName[r.ministryId] ?? 'Ministry' : 'Whole church'} · ${presentNames.length} present · ${lateNames.length} late · ${excusedNames.length} excused${r.extra ? ` · ${r.extra} extra` : ''}`),
+      presentNames.length ? h('p', {}, presentNames.map((n) => h('span', { class: 'pill good' }, n))) : null,
+      lateNames.length ? h('p', {}, h('b', {}, 'Late: '), lateNames.map((n) => h('span', { class: 'pill warn' }, n))) : null,
+      excusedNames.length ? h('p', {}, h('b', {}, 'Excused: '), excusedNames.map((n) => h('span', { class: 'pill muted' }, n))) : null,
+      !presentNames.length && !lateNames.length && !excusedNames.length ? empty('No individual names recorded.') : null,
       h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: () => { dlg.close(); takeForm(r); } }, 'Edit'),
         h('button', { class: 'btn del', onclick: async () => { if (await confirmDialog('Delete this attendance record?')) { await repo.remove('attendance', r.id); dlg.close(); rerender(); } } }, icon('trash', { size: 15 }), 'Delete'))));
   };
@@ -94,7 +96,12 @@ export async function attendanceView({ repo, user, ministries, members, rerender
       const presentIds = keys.map((k) => idFor.get(k) ?? k);
       const existing = recs.find((r) => r.date === date && r.service === 'Clock-in device' && !r.ministryId);
       const merged = new Set([...(existing?.presentIds ?? []), ...presentIds]);
-      await repo.save('attendance', { ...existing, date, service: 'Clock-in device', ministryId: undefined, presentIds: [...merged], extra: existing?.extra ?? 0 });
+      // A clock-in device can only ever report "was here" — if someone previously marked Late or
+      // Excused by hand now shows up in the device log, that's an upgrade to Present, not a
+      // second, conflicting status alongside it.
+      const lateIds = (existing?.lateIds ?? []).filter((id) => !merged.has(id));
+      const excusedIds = (existing?.excusedIds ?? []).filter((id) => !merged.has(id));
+      await repo.save('attendance', { ...existing, date, service: 'Clock-in device', ministryId: undefined, presentIds: [...merged], lateIds, excusedIds, extra: existing?.extra ?? 0 });
     }
     let msg = `${plan.days.length} day${plan.days.length === 1 ? '' : 's'} of attendance imported from the device log`;
     if (plan.toCreate.length) msg += `, ${plan.toCreate.length} new member${plan.toCreate.length === 1 ? '' : 's'} added`;
@@ -112,7 +119,10 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     const date = importDate.value || today();
     const existing = recs.find((r) => r.date === date && r.service === 'Attendance upload' && !r.ministryId);
     const merged = new Set([...(existing?.presentIds ?? []), ...presentIds]);
-    await repo.save('attendance', { ...existing, date, service: 'Attendance upload', ministryId: undefined, presentIds: [...merged], extra: existing?.extra ?? 0 });
+    // Same upgrade-not-conflict reasoning as the device-log import above.
+    const lateIds = (existing?.lateIds ?? []).filter((id) => !merged.has(id));
+    const excusedIds = (existing?.excusedIds ?? []).filter((id) => !merged.has(id));
+    await repo.save('attendance', { ...existing, date, service: 'Attendance upload', ministryId: undefined, presentIds: [...merged], lateIds, excusedIds, extra: existing?.extra ?? 0 });
     let msg = `${presentIds.length} marked present`;
     if (unmatched.length) msg += `, ${unmatched.length} not matched: ${unmatched.slice(0, 8).join(', ')}${unmatched.length > 8 ? '…' : ''}`;
     toast(msg, presentIds.length ? 'ok' : 'err');
@@ -140,7 +150,7 @@ export async function attendanceView({ repo, user, ministries, members, rerender
   const drawTable = () => {
     const ministryMemberIds = ministryFilter ? new Set(members.filter((m) => m.ministryIds?.includes(ministryFilter)).map((m) => m.id)) : null;
     const rows = recs.filter((r) => !ministryFilter || r.ministryId === ministryFilter || !r.ministryId);
-    const heads = ministryMemberIds ? ['Service', 'For', 'Total', `${mName[ministryFilter] ?? 'Ministry'} present`] : ['Service', 'For', 'Total'];
+    const heads = ['Service', 'For', 'Total', 'Late', 'Excused', ...(ministryMemberIds ? [`${mName[ministryFilter] ?? 'Ministry'} present`] : [])];
 
     // ---- group into one fold per date, newest (or oldest) date first ----
     const byDate = new Map();
@@ -159,8 +169,8 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     // across every page, not just what's currently on screen (a report that silently dropped
     // whatever page you weren't looking at would be worse than no export at all).
     const scope = ministryFilter ? mName[ministryFilter] ?? 'Ministry' : 'Whole church';
-    const exportCsv = () => download(`attendance-${scope.toLowerCase().replace(/\s+/g, '-')}.csv`, toCsv([['date', 'service', 'for', 'total present', ...(ministryMemberIds ? [`${scope} present`] : [])],
-      ...rows.map((r) => [r.date, r.service, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church', attendanceCount(r),
+    const exportCsv = () => download(`attendance-${scope.toLowerCase().replace(/\s+/g, '-')}.csv`, toCsv([['date', 'service', 'for', 'total present', 'late', 'excused', ...(ministryMemberIds ? [`${scope} present`] : [])],
+      ...rows.map((r) => [r.date, r.service, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church', attendanceCount(r), (r.lateIds ?? []).length, (r.excusedIds ?? []).length,
         ...(ministryMemberIds ? [(r.presentIds ?? []).filter((id) => ministryMemberIds.has(id)).length] : [])])]), 'text/csv');
     const printHead = pdfHeader(churchName, cs, `Attendance report — ${scope}`,
       h('div', {}, `${rows.length} record${rows.length === 1 ? '' : 's'}`), user.name);
@@ -168,6 +178,7 @@ export async function attendanceView({ repo, user, ministries, members, rerender
       h('thead', {}, h('tr', {}, ['Date', ...heads].map((t) => h('th', {}, t)))),
       h('tbody', {}, rows.map((r) => h('tr', {},
         h('td', {}, fmtDate(r.date)), h('td', {}, r.service), h('td', {}, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church'), h('td', {}, attendanceCount(r)),
+        h('td', {}, (r.lateIds ?? []).length), h('td', {}, (r.excusedIds ?? []).length),
         ministryMemberIds && h('td', {}, (r.presentIds ?? []).filter((id) => ministryMemberIds.has(id)).length)))));
 
     const controls = h('div', { class: 'filters' },
@@ -191,6 +202,7 @@ export async function attendanceView({ repo, user, ministries, members, rerender
           h('tbody', {}, dayRecs.map((r) => h('tr', { class: 'click', onclick: () => openDetail(r) },
             h('td', { class: 'sel-col', onclick: (e) => e.stopPropagation() }, sel.box(r.id)),
             h('td', {}, r.service), h('td', {}, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church'), h('td', {}, attendanceCount(r)),
+            h('td', {}, (r.lateIds ?? []).length), h('td', {}, (r.excusedIds ?? []).length),
             ministryMemberIds && h('td', {}, (r.presentIds ?? []).filter((id) => ministryMemberIds.has(id)).length))))));
     });
 

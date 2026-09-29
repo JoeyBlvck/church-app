@@ -43,7 +43,11 @@ export async function dashboardView({ repo, user, ministries, members, go }) {
     .sort((a, b) => a.birthday.slice(8).localeCompare(b.birthday.slice(8)));
   const visitors = members.filter((m) => m.status === 'visitor');
   const recent = church.slice(0, 3);
-  const absent = recent.length === 3 ? members.filter((m) => m.status === 'member' && att.some((a) => a.presentIds?.includes(m.id)) && !recent.some((a) => a.presentIds?.includes(m.id))) : [];
+  // Late still counts as "seen" here — they showed up, just not on time — so only Present/Late
+  // keep someone off this list; Excused does not (a known reason for missing is still worth a
+  // pastoral check-in, same as before Late/Excused existed).
+  const seenIn = (a, id) => a.presentIds?.includes(id) || a.lateIds?.includes(id);
+  const absent = recent.length === 3 ? members.filter((m) => m.status === 'member' && att.some((a) => seenIn(a, m.id)) && !recent.some((a) => seenIn(a, m.id))) : [];
 
   const list = (title, items, render, none) => h('div', { class: 'card' }, h('b', {}, title), items.length ? h('ul', { class: 'plain' }, items.slice(0, 6).map((x) => h('li', {}, render(x)))) : h('p', { class: 'hint' }, none),
     items.length > 6 && h('p', { class: 'hint' }, `+ ${items.length - 6} more`));
