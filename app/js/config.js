@@ -12,3 +12,6 @@ export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in
 const isLocalDev = !isTauri && ['localhost', '127.0.0.1', ''].includes(location.hostname);
 export const API_URL = localStorage.getItem('apiUrl') ?? (isLocalDev ? 'http://localhost:8787' : PRODUCTION_API_URL);
 export const CURRENCY = 'GHS';
+// Bumped by hand alongside README's version header and tauri.conf.json's "version" -- shown
+// in the startup console log (main.js) and in Settings -> Help & Support (settings.js).
+export const APP_VERSION = '0.18.0';

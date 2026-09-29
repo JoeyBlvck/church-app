@@ -3,6 +3,7 @@ import { icon } from '../icons.js';
 import { toCSV } from '../csv.js';
 import { renderQrToCanvas, qrToSvgString } from '../vendor/qrcode.js';
 import { getTheme, setTheme } from '../theme.js';
+import { APP_VERSION } from '../config.js';
 
 // The 16 regions of Ghana (2019 boundaries) — a convenience picker, since this app is built
 // for Ghanaian churches; District and Location stay free text since there are far too many
@@ -171,6 +172,24 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Save')));
   if (qrCanvas) renderQrToCanvas(qrCanvas, checkinLink, { moduleSize: 6 });
 
+  // ---- Help & Support: everyone can see this (no role check) -- an about blurb, a short FAQ
+  // (native <details>/<summary>, the same disclosure pattern already used above for WhatsApp's
+  // "Advanced" field and elsewhere in the app), and two direct contact buttons. Placed right
+  // before the Danger zone so it's the last "normal" card on the page, not mixed in among the
+  // admin-only integration cards above it.
+  const helpFaqs = [
+    ["Does it work without an internet connection?", "Yes \u2014 every screen works fully offline on each device. Anything you enter is saved immediately on that device and syncs automatically the next time it's back online."],
+    ["Is my church's data safe?", "Each church's data is kept completely separate, and only your own staff accounts can sign in to it. Giving and finance records are append-only, so a posted entry can never be silently edited or deleted \u2014 corrections are always recorded as new, linked entries."],
+    ["How do updates work?", "The desktop app checks for updates automatically while it's open and connected to the internet, and lets you install them with one click."],
+    ["How do I get help or report a problem?", "Use the buttons below to email or WhatsApp us directly, any time."],
+  ];
+  const helpCard = h('div', { class: 'card' }, h('b', {}, 'Help & Support'),
+    h('p', { class: 'hint' }, `The ChurchFlow v${APP_VERSION} \u00b7 by Joey Studios`),
+    ...helpFaqs.map(([q, a]) => h('details', {}, h('summary', {}, q), h('p', { class: 'hint' }, a))),
+    h('p', { class: 'actions' },
+      h('a', { class: 'btn ghost', href: 'mailto:joelmensah40@gmail.com' }, icon('chat', { size: 15 }), 'Email support'),
+      h('a', { class: 'btn ghost', href: 'https://wa.me/233547580808', target: '_blank', rel: 'noopener' }, icon('phone', { size: 15 }), 'WhatsApp support')));
+
   // ---- Factory reset: owner/admin only, and deliberately the very last, most visually distinct
   // thing on the page (see '.card.danger-zone' in style.css) -- wipes every member, household,
   // attendance record, transaction, ministry, and setting this church has ever saved, but keeps
@@ -240,5 +259,6 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
         } catch (ex) { toast(ex.message, 'err'); }
         finally { btn.disabled = false; }
       } }, icon('download', { size: 15 }), 'Pull enrolled users from device'))),
+    helpCard,
     canManageChurch && h('div', { class: 'card danger-zone' }, h('b', {}, 'Danger zone'), resetForm));
 }

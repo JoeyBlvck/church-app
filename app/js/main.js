@@ -1,11 +1,11 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
-import { API_URL, isTauri } from './config.js';
+import { API_URL, isTauri, APP_VERSION } from './config.js';
 import { checkForUpdate, signOutIfInstalledOutsideUpdater } from './updater.js';
 import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo } from './ui.js';
 import { icon } from './icons.js';
 
-console.log('The ChurchFlow build: v0.18.0 (forgot password)'); // sanity check: confirms which build the browser actually loaded
+console.log(`The ChurchFlow build: v${APP_VERSION} (forgot password)`); // sanity check: confirms which build the browser actually loaded
 
 const repo = createRepo(idbStore(), { baseUrl: API_URL });
 const root = document.getElementById('app');
