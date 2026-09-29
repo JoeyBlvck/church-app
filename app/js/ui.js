@@ -13,6 +13,19 @@ export function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
+// The ChurchFlow's own brand mark — as opposed to a church's own uploaded logo, which always takes
+// priority wherever one exists (see churchSettings.logo/cs.logo throughout, and the ministry/give
+// logo fallbacks, which still fall back to the generic icon('church') outline, not this: those slots
+// represent a specific church's or ministry's own identity, not the product's). This is what shows
+// wherever the product itself needs to speak for itself instead: every sign-in/sign-up/reset screen,
+// the platform-admin console's own brand, and the public giving/check-in pages before a church's
+// own branding loads. A plain <img> onto the existing .brand-mark box (see style.css's
+// `.brand-mark img { width:100%; height:100%; object-fit:contain; }`) rather than one of the
+// inline icon() SVGs used elsewhere, since the real logo is a raster asset with its own colour and
+// background baked in — callers drop the 'icon' class (which would otherwise paint a redundant
+// teal box behind it) from the wrapping .brand-mark element.
+export const brandLogo = () => h('img', { src: 'brand/logo-192.png', alt: '' });
+
 // A fetch()-level failure — offline, DNS failure, CORS, the server simply not reachable — always
 // throws a TypeError, but its exact wording differs by browser engine: "Failed to fetch" in
 // Chrome/Edge/WebView2 (the Windows desktop build), "Load failed" in Safari/WKWebView (the Mac

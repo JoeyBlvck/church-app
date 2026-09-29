@@ -1,7 +1,7 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
 import { API_URL, isTauri } from './config.js';
-import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError } from './ui.js';
+import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo } from './ui.js';
 import { icon } from './icons.js';
 
 console.log('The ChurchFlow build: v0.18.0 (forgot password)'); // sanity check: confirms which build the browser actually loaded
@@ -454,7 +454,7 @@ function renderResetPassword(token) {
   } },
     passwordField('New password', { autocomplete: 'new-password', withStrength: true }), err,
     h('p', {}, h('button', { class: 'btn block' }, 'Set new password')));
-  const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
+  const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark' }, brandLogo()),
     h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
   root.replaceChildren(h('div', { class: 'login-shell' },
     h('div', { class: 'login-aside' },
@@ -526,7 +526,7 @@ function renderLogin() {
       mode === 'login' && h('p', { class: 'forgot-link' }, h('a', { href: '#', onclick: (e) => { e.preventDefault(); openForgotPassword(emailInput.value.trim()); } }, 'Forgot password?')),
       h('p', {}, h('button', { class: 'btn block' }, c.btn)));
     prefillEmail = '';
-    const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
+    const brandRow = (cls) => h('div', { class: `brand-row ${cls}` }, h('span', { class: 'brand-mark' }, brandLogo()),
       h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
     root.replaceChildren(h('div', { class: 'login-shell' },
       h('div', { class: 'login-aside' },

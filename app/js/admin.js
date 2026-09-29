@@ -11,7 +11,7 @@
 // still untouchable here, created once at church creation and never edited from this console,
 // the same line server/src/app.js's own POST /users/update already draws for a church's own
 // admins.
-import { h, field, val, opts, byName, fmtDate, modal, confirmDialog, toast, photoPicker, isNetworkError } from './ui.js';
+import { h, field, val, opts, byName, fmtDate, modal, confirmDialog, toast, photoPicker, isNetworkError, brandLogo } from './ui.js';
 import { icon } from './icons.js';
 import { API_URL } from './config.js';
 
@@ -60,7 +60,7 @@ function renderLogin() {
     h('label', {}, 'Password'), h('input', { name: 'password', type: 'password', required: true, autocomplete: 'current-password' }), err,
     h('p', {}, h('button', { class: 'btn block' }, 'Sign in')));
   root.replaceChildren(h('div', { class: 'login-page' }, h('div', { class: 'card login-card' },
-    h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
+    h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark' }, brandLogo()),
       h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow'))),
     h('h1', {}, 'Platform admin'), h('p', { class: 'subtitle' }, 'Operator console — separate from every church’s own sign-in.'),
     f)));
@@ -261,7 +261,7 @@ function renderConsole(tenants) {
   q.oninput = draw; draw();
 
   root.replaceChildren(h('div', { class: 'shell' },
-    h('nav', {}, h('div', { class: 'brand' }, h('span', { class: 'brand-mark icon' }, icon('church', { size: 22 })),
+    h('nav', {}, h('div', { class: 'brand' }, h('span', { class: 'brand-mark' }, brandLogo()),
         h('h1', {}, 'The Church', h('span', {}, 'Flow'), h('small', {}, 'Platform admin'))),
       h('div', { class: 'navlinks' }, h('div', { class: 'nav-title' }, 'Console'), h('button', { class: 'on' }, h('span', { class: 'ico' }, icon('church')), h('span', {}, 'Churches'))),
       // Back to the regular church app — a separate page (its own login, own token), not another

@@ -1,8 +1,9 @@
 // App shell is fetched fresh when online (so updates arrive) and served from cache when offline. Data lives in IndexedDB.
-const CACHE = 'church-shell-v17';
+const CACHE = 'church-shell-v18';
 const SHELL = ['./', 'index.html', 'style.css', 'manifest.webmanifest', 'js/main.js', 'js/sync.js', 'js/store.js', 'js/ui.js', 'js/icons.js', 'js/config.js', 'js/csv.js', 'js/importers.js',
   'js/views/dashboard.js', 'js/views/members.js', 'js/views/ministries.js', 'js/views/attendance.js', 'js/views/finance.js',
-  'js/views/reports.js', 'js/views/people.js', 'js/views/programmes.js', 'js/views/settings.js'];
+  'js/views/reports.js', 'js/views/people.js', 'js/views/programmes.js', 'js/views/settings.js',
+  'brand/logo-192.png', 'brand/logo-512.png', 'brand/favicon-32.png', 'brand/favicon-16.png', 'brand/favicon.ico', 'brand/apple-touch-icon.png'];
 
 // skipWaiting + clients.claim: a new version takes over immediately instead of
 // sitting "waiting" until every tab is closed (the default service-worker lifecycle).
