@@ -377,7 +377,7 @@ async function render() {
     h('nav', {}, h('div', { class: 'brand' }, brandMark,
         h('h1', {}, 'The Church', h('span', {}, 'Flow'), h('small', {}, churchSettings.motto || 'Church management'))),
       h('div', { class: 'navlinks' }, navItems),
-      h('button', { class: 'signout', onclick: async () => { if (!pending || confirm(`${pending} changes haven't synced and will be lost. Sign out anyway?`)) { await repo.logout(); setTab(null); render(); } } }, h('span', { class: 'ico' }, icon('signout')), h('span', {}, 'Sign out'))),
+      h('button', { class: 'signout', onclick: async () => { if (!pending || confirm(`${pending} changes haven't synced yet. They'll be kept if you sign back into this church on this device, but lost if a different church signs in here first. Sign out anyway?`)) { await repo.logout(); setTab(null); render(); } } }, h('span', { class: 'ico' }, icon('signout')), h('span', {}, 'Sign out'))),
     h('main', {}, h('div', { class: 'bar top' }, topBar), h('div', { class: 'view-enter' }, view)),
     mobileTabbar));
 }
@@ -479,7 +479,13 @@ function renderLogin() {
       const btn = f.querySelector('button'); btn.disabled = true;
       try {
         if (mode === 'login') {
-          await repo.login(g('email'), f.elements.password.value);
+          const email = g('email'), password = f.elements.password.value;
+          try {
+            await repo.login(email, password);
+          } catch (ex) {
+            if (ex.message !== 'Failed to fetch') throw ex; // a real answer from the server (e.g. wrong password) — don't second-guess it
+            await repo.loginOffline(email, password); // couldn't even reach the server — fall back to this device's saved copy, if any
+          }
           await sync(); render();
         } else {
           const email = g('email');

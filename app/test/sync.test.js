@@ -138,6 +138,50 @@ test('resync drops stale local copies (e.g. leader moved out of a ministry)', as
   w.server.close();
 });
 
+test('signing out keeps local data and the offline-login copy; a different church still wipes it', async () => {
+  const w = await world();
+  const laptop = w.device();
+  await laptop.registerChurch({ churchName: 'Grace', name: 'Pastor', email: 'p@g.org', password: 'password1' });
+  await laptop.save('members', { name: 'Ama Mensah' });
+  await laptop.sync();
+
+  await laptop.logout();
+  assert.equal(await laptop.user(), undefined);
+  assert.equal((await laptop.list('members')).length, 1); // local data survives a plain sign-out
+
+  w.setOnline(false);
+  await assert.rejects(laptop.login('p@g.org', 'wrong-password'));       // wrong password still rejected offline
+  await assert.rejects(laptop.loginOffline('p@g.org', 'wrong-password'));
+  const user = await laptop.loginOffline('p@g.org', 'password1');         // right password, no network at all
+  assert.equal(user.email, 'p@g.org');
+  assert.equal((await laptop.list('members')).length, 1);                 // still there — no wipe, no re-sync needed
+
+  await laptop.logout();
+  w.setOnline(true);
+  const other = w.device();
+  await other.registerChurch({ churchName: 'Bethel', name: 'Pastor B', email: 'b@x.org', password: 'password1' });
+  await laptop.login('b@x.org', 'password1');                             // a DIFFERENT church signs in on the same device
+  assert.equal((await laptop.list('members')).length, 0);                 // wiped, even though the sign-out happened first
+  w.server.close();
+});
+
+test('offline login refuses an account this device has never seen, and picks up a changed password', async () => {
+  const w = await world();
+  const laptop = w.device();
+  await laptop.registerChurch({ churchName: 'Grace', name: 'Pastor', email: 'p@g.org', password: 'password1' });
+  w.setOnline(false);
+  await assert.rejects(laptop.loginOffline('stranger@nowhere.org', 'whatever1'));
+  w.setOnline(true);
+
+  await laptop.changePassword('password1', 'password2');
+  await laptop.logout();
+  w.setOnline(false);
+  await assert.rejects(laptop.loginOffline('p@g.org', 'password1'));      // old password no longer works offline either
+  const user = await laptop.loginOffline('p@g.org', 'password2');
+  assert.equal(user.email, 'p@g.org');
+  w.server.close();
+});
+
 test('profile edit updates the cached session, and church settings (logo/motto/…) sync to every device', async () => {
   const w = await world();
   const office = w.device(), phone = w.device();

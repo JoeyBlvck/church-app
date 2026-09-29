@@ -1,6 +1,8 @@
 // Local-first data layer. All reads/writes hit the local store immediately
 // (works offline). sync() pushes dirty records and pulls server changes.
 
+import { rememberOfflineCredential, checkOfflineCredential } from './offlineAuth.js';
+
 export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now = () => Date.now(), uuid = () => crypto.randomUUID() } = {}) {
   const listeners = new Set();
   const emit = () => listeners.forEach((f) => f());
@@ -25,24 +27,51 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
     // ---- session (cached so the app opens offline) ----
     async login(email, password) {
       const s = await http('POST', '/auth/login', { email, password });
-      await repo._startSession(s); return s.user;
+      await repo._startSession(s);
+      await rememberOfflineCredential(store, email, password, s); // so this device can sign in offline later, too
+      return s.user;
     },
     async registerChurch(input) {
       const s = await http('POST', '/auth/register-church', input);
-      await repo._startSession(s); return s.user;
+      await repo._startSession(s);
+      await rememberOfflineCredential(store, input.email, input.password, s);
+      return s.user;
+    },
+    // Signing in with no internet at all: checks the password against this device's own saved
+    // copy (offlineAuth.js) instead of asking the server, and restores whatever session was
+    // cached the last time this account was online here. Only ever tried as a fallback once a
+    // real login attempt couldn't even reach the server — see main.js's renderLogin().
+    async loginOffline(email, password) {
+      const rec = await checkOfflineCredential(store, email, password);
+      if (!rec) throw new Error("Can't sign in offline — wrong password, or this account hasn't signed in on this device before.");
+      await repo._startSession({ token: rec.token, user: rec.user });
+      return rec.user;
     },
     async _startSession(s) {
-      const prev = await store.getMeta('user');
-      if (prev && prev.tenantId !== s.user.tenantId) await store.clear(); // never mix churches
+      // Compared against a key that survives sign-out (unlike 'user' below, which logout()
+      // clears) so switching to a DIFFERENT church on this device still wipes everything first,
+      // even if the previous church's staff signed out before the new one signs in.
+      const lastTenantId = await store.getMeta('lastTenantId');
+      if (lastTenantId && lastTenantId !== s.user.tenantId) await store.clear(); // never mix churches
       await store.setMeta('token', s.token);
       await store.setMeta('user', s.user);
+      await store.setMeta('lastTenantId', s.user.tenantId);
     },
     user: () => store.getMeta('user'),
-    async logout() { await store.clear(); emit(); },
+    // Clears only the active session on this device. Local data and any saved offline-login
+    // copy (see offlineAuth.js / _startSession above) are left alone, so signing back into the
+    // SAME church here — even with no internet — picks up right where things were left off,
+    // rather than starting from an empty, freshly re-downloaded church.
+    async logout() { await store.deleteMeta('token'); await store.deleteMeta('user'); emit(); },
     createStaff: (input) => http('POST', '/users', input),
     listStaff: () => http('GET', '/users'),
     updateStaff: (input) => http('POST', '/users/update', input),
-    changePassword: (current, next) => http('POST', '/auth/change-password', { current, next }),
+    async changePassword(current, next) {
+      const r = await http('POST', '/auth/change-password', { current, next });
+      const user = await store.getMeta('user');
+      if (user) await rememberOfflineCredential(store, user.email, next, { token: await store.getMeta('token'), user }); // keep the offline copy in step
+      return r;
+    },
     // "Forgot password" (renderLogin's own link, and the reset screen /?resetToken=... lands
     // on): both unauthenticated — there's no session yet at this point — so they ride the same
     // http() helper as everything else, just without a token to send. requestPasswordReset
