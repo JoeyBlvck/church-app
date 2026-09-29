@@ -1,11 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for The ChurchFlow's main window: standard window/app controls only — no filesystem, shell, or process access, since the app is just the existing web client talking to the hosted server over HTTPS.",
+  "description": "Capabilities for The ChurchFlow's main window: standard window/app controls, plus checking for and installing signed app updates (see app/js/updater.js) — still no filesystem or shell access, since the app itself is just the existing web client talking to the hosted server over HTTPS.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:default",
-    "core:app:default"
+    "core:app:default",
+    "updater:default",
+    "process:default"
   ]
 }

@@ -63,15 +63,48 @@ jobs:
       - name: Install the Tauri CLI
         run: npm install
 
-      - name: Build the app (unsigned) and publish it to the "latest" release
+      # Every run publishes to the SAME "latest" release (see the big comment at the top of this
+      # file), so the version committed in src-tauri/tauri.conf.json never changes on its own --
+      # without this step, the updater below would compare each new build against the same old
+      # version number and never think there's anything new to offer. Appending the run number
+      # (GitHub's own strictly-increasing counter for this workflow) as the patch version gives
+      # every run a version newer than the last, with zero chance of forgetting to bump it by
+      # hand. This only changes the build's own copy of the file, in the runner -- nothing is
+      # committed back to the repo.
+      - name: Set this build's version (keeps auto-update comparisons meaningful across builds)
+        shell: bash
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          path = "src-tauri/tauri.conf.json"
+          with open(path) as f:
+              cfg = json.load(f)
+          base = ".".join(cfg["version"].split(".")[:2])
+          cfg["version"] = f"{base}.{os.environ['RUN_NUMBER']}"
+          with open(path, "w") as f:
+              json.dump(cfg, f, indent=2)
+              f.write("\n")
+          print("Building version", cfg["version"])
+          PY
+
+      # Signed so the auto-updater (app/js/updater.js) can tell a real update from anything else.
+      # TAURI_SIGNING_PRIVATE_KEY(_PASSWORD) are the two GitHub Actions secrets set up per
+      # src-tauri/UPDATER_SIGNING_SECRETS.txt; includeUpdaterJson makes tauri-action also publish
+      # the signed latest.json manifest the updater's tauri.conf.json "endpoints" points at.
+      - name: Build the app (signed) and publish it to the "latest" release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: latest
           releaseName: 'The ChurchFlow — latest build'
-          releaseBody: 'Automatically built from the latest main branch by the "Build desktop app" workflow. Unsigned — see the README for what that means the first time you open it.'
+          releaseBody: 'Automatically built from the latest main branch by the "Build desktop app" workflow. The installer itself is still unsigned by Apple/Microsoft — see the README for what that means the first time you open it — but auto-updates between builds are cryptographically signed and verified.'
           releaseDraft: false
           prerelease: false
           uploadWorkflowArtifacts: true
+          includeUpdaterJson: true
           args: ${{ matrix.tauriArgs }}

@@ -25,3 +25,8 @@ npm-debug.log*
 # Build output (Tauri desktop app, once scaffolded)
 src-tauri/target/
 dist/
+
+# Desktop auto-update signing key -- lives in GitHub Actions secrets instead, never in git
+# (see src-tauri/UPDATER_SIGNING_SECRETS.txt for what to do with it)
+src-tauri/updater-signing-key.pem*
+src-tauri/UPDATER_SIGNING_SECRETS.txt

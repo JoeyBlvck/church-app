@@ -6,6 +6,11 @@
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // See app/js/updater.js: it drives both of these from the frontend via
+        // window.__TAURI__.updater / .process (app.withGlobalTauri, set in tauri.conf.json,
+        // is what exposes that global without needing an npm build step for the frontend).
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .run(tauri::generate_context!())
         .expect("error while running The ChurchFlow");
 }

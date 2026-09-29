@@ -1,6 +1,7 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
 import { API_URL, isTauri } from './config.js';
+import { checkForUpdate } from './updater.js';
 import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo } from './ui.js';
 import { icon } from './icons.js';
 
@@ -547,7 +548,7 @@ function renderLogin() {
   draw();
 }
 
-addEventListener('online', () => { online = true; sync(); });
+addEventListener('online', () => { online = true; sync(); checkForUpdate(); });
 addEventListener('offline', () => { online = false; if (!isEditingPage()) render(); }); // don't wipe an in-progress form just to flip the status dot (see isEditingPage() above); it'll show on the next render regardless
 
 // ---- auto sign-out after inactivity (browser/PWA only) ----------------------------------------
@@ -613,4 +614,8 @@ addEventListener('click', (e) => {
 // (see isEditingPage() above), so these automatic triggers no longer need to guard themselves.
 let t; repo.onChange(() => { clearTimeout(t); t = setTimeout(async () => { if (await repo.pending()) sync(); }, 1500); });
 setInterval(() => { sync(); }, 60_000);
-render().then(() => sync());
+// Desktop only (checkForUpdate no-ops on web/PWA, where there's no window.__TAURI__ at all) --
+// checked here on every app open, and again every few hours in case the app is just left running
+// for days, rather than only ever on the 'online' trigger above.
+setInterval(() => { checkForUpdate(); }, 4 * 60 * 60_000);
+render().then(() => { sync(); checkForUpdate(); });
