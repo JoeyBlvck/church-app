@@ -202,3 +202,47 @@ test('/give/webhook: verifies the HMAC signature against the right church\'s sec
     assert.equal(status.body.status, 'paid');
   } finally { globalThis.fetch = globalFetch2; }
 });
+
+test('a donor\'s browser polling /give/status and Paystack\'s own webhook landing at the same moment never double-posts the gift', async (t) => {
+  const { base, call } = await setup(t);
+  const o = (await call('POST', '/auth/register-church', { churchName: 'Grace', name: 'a', email: 'a@x.org', password: 'password1' })).body;
+  await call('POST', '/paystack/config', { secretKey: 'sk_test_1', publicKey: 'pk_test_1' }, o.token);
+
+  const originalFetch = globalThis.fetch;
+  let verifyCalls = 0;
+  globalThis.fetch = async (url, opts) => {
+    if (String(url).includes('/transaction/initialize')) {
+      const body = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ status: true, data: { authorization_url: 'https://x', reference: body.reference } }) };
+    }
+    if (String(url).includes('/transaction/verify/')) {
+      verifyCalls++;
+      // A real network round trip — long enough that BOTH callers below are guaranteed to have
+      // already read the same still-pending intent and be sitting mid-await here together,
+      // which is exactly the window the old code got wrong.
+      await new Promise((r) => setTimeout(r, 15));
+      return { ok: true, json: async () => ({ status: true, data: { status: 'success', amount: 10000, channel: 'mobile_money' } }) };
+    }
+    return originalFetch(url, opts);
+  };
+  try {
+    const init = await call('POST', '/give/init', { tenantId: o.user.tenantId, amount: 100, purpose: 'tithe', donorPhone: '0244000000' });
+    const reference = init.body.reference;
+    const raw = JSON.stringify({ event: 'charge.success', data: { reference } });
+    const sig = createHmac('sha512', 'sk_test_1').update(raw).digest('hex');
+
+    // The donor's browser bouncing back to /give/status, and Paystack's webhook, arrive together.
+    const [statusRes, webhookRes] = await Promise.all([
+      call('GET', '/give/status?ref=' + reference),
+      fetch(base + '/give/webhook', { method: 'POST', headers: { 'content-type': 'application/json', 'x-paystack-signature': sig }, body: raw }),
+    ]);
+    assert.equal(statusRes.body.status, 'paid');
+    assert.equal(webhookRes.status, 200);
+    assert.equal(verifyCalls, 2); // both really did race each other — the test would be meaningless otherwise
+
+    const tx = await call('GET', '/sync/pull?since=0', null, o.token);
+    const posted = tx.body.changes.filter((c) => c.collection === 'transactions');
+    assert.equal(posted.length, 1); // exactly one transaction, never two, no matter who "won"
+    assert.equal(posted[0].data.amount, 100);
+  } finally { globalThis.fetch = originalFetch; }
+});

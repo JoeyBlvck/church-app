@@ -1,4 +1,4 @@
-import { h, field, val, opts, byName, sum, money, today, fmtDate, monthKey, modal, confirmDialog, toast, download, toCsv, empty, barChart, signedAmount, pdfHeader } from '../ui.js';
+import { h, field, val, opts, byName, sum, money, today, fmtDate, monthKey, modal, confirmDialog, toast, download, toCsv, empty, barChart, signedAmount, pdfHeader, dateKey } from '../ui.js';
 import { icon } from '../icons.js';
 
 export const TYPES = ['tithe', 'offering', 'welfare', 'pledge payment', 'donation', 'expense'];
@@ -185,7 +185,7 @@ export async function financeView({ repo, user, ministries, members, rerender, i
 
   const drawTx = () => {
     const rows = filtered(), inc = sum(rows, incomeAmt), exp = sum(rows, expenseAmt);
-    const months = [...Array(6)].map((_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (5 - i)); return d.toISOString().slice(0, 7); });
+    const months = [...Array(6)].map((_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (5 - i)); return dateKey(d).slice(0, 7); }); // local month, not UTC (toISOString would shift near a month boundary)
     const chart = months.map((mo) => ({ label: mo.slice(5), value: sum(tx.filter((t) => monthKey(t.date) === mo), incomeAmt) }));
     const exportCsv = () => download(`finance-${state.from}_${state.to}.csv`, toCsv([['date', 'type', 'amount', 'method', 'member', 'ministry', 'note', 'recorded by', 'reverses', 'corrects'],
       ...rows.map((t) => [t.date, t.type, t.amount, t.method, memName[t.memberId], mName[t.ministryId], t.note, t.recordedBy, t.reverses ?? '', t.correctsId ?? ''])]), 'text/csv');

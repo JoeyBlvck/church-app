@@ -6,6 +6,7 @@ import { rememberOfflineCredential, checkOfflineCredential } from './offlineAuth
 export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now = () => Date.now(), uuid = () => crypto.randomUUID() } = {}) {
   const listeners = new Set();
   const emit = () => listeners.forEach((f) => f());
+  let churchNameRefreshedThisSession = false;
 
   async function token() { return store.getMeta('token'); }
 
@@ -86,7 +87,25 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
       await store.setMeta('user', user);
       emit(); return user;
     },
-    async churchName() { try { const m = await http('GET', '/me'); await store.setMeta('church', m.church); return m.church; } catch { return store.getMeta('church'); } },
+    // Nearly every view calls this (mostly just to print it in a PDF header someone may never
+    // even open), and it used to hit the server every single time — a live network round trip
+    // on almost every navigation. Now it only blocks on the network the first time this device
+    // has nothing cached; after that it answers instantly from the cache and refreshes that
+    // cache in the background at most once per app session (a church's name essentially never
+    // changes mid-session, so that's plenty fresh).
+    async churchName() {
+      const cached = await store.getMeta('church');
+      if (cached !== undefined) {
+        if (!churchNameRefreshedThisSession) {
+          churchNameRefreshedThisSession = true;
+          http('GET', '/me').then((m) => store.setMeta('church', m.church)).catch(() => {});
+        }
+        return cached;
+      }
+      churchNameRefreshedThisSession = true;
+      try { const m = await http('GET', '/me'); await store.setMeta('church', m.church); return m.church; }
+      catch { return store.getMeta('church'); }
+    },
 
     // ---- SMS (Arkesel) — direct server calls, not local-first: the API key never leaves the
     // server, and sending is an immediate action rather than something to queue offline ----
@@ -194,9 +213,23 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
             conflicted++;
             if (stillSame) await store.put({ collection: res.collection, id: res.id, data: res.data,
               updatedAt: res.updatedAt, deleted: res.deleted, dirty: false, seq: res.seq, rejected: 'conflict' });
+            // Edited again locally while this push was in flight: keep that newer edit (still
+            // dirty, to be retried) rather than overwriting it with the server's older copy, but
+            // still adopt the authoritative seq the server just told us about — otherwise the
+            // retry would keep sending a stale baseSeq and conflict again for the same reason
+            // forever, even though nothing about the newer edit itself was ever rejected.
+            else await store.put({ ...rec, seq: res.seq });
           } else if (stillSame) {
             await store.put({ collection: res.collection, id: res.id, data: rec.data,
               updatedAt: rec.updatedAt, deleted: rec.deleted, dirty: false, seq: res.seq });
+          } else {
+            // Edited again locally while this push was in flight (see the 'conflict' branch
+            // above for why this matters): the server accepted what we sent as seq res.seq, so
+            // the next push of the newer edit needs THAT as its baseSeq, not the older one this
+            // record still has — otherwise the server would reject the next push as a false
+            // conflict against our own just-accepted write, and the client would then silently
+            // discard the newer edit as if it had been "overtaken by another device".
+            await store.put({ ...rec, seq: res.seq });
           }
         }
       }

@@ -3,15 +3,6 @@ import { createRepo } from './sync.js';
 import { API_URL } from './config.js';
 import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal } from './ui.js';
 import { icon } from './icons.js';
-import { dashboardView } from './views/dashboard.js';
-import { membersView } from './views/members.js';
-import { ministriesView } from './views/ministries.js';
-import { attendanceView } from './views/attendance.js';
-import { financeView } from './views/finance.js';
-import { reportsView } from './views/reports.js';
-import { staffView, announcementsView } from './views/people.js';
-import { programmesView } from './views/programmes.js';
-import { settingsView } from './views/settings.js';
 
 console.log('The ChurchFlow build: v0.18.0 (forgot password)'); // sanity check: confirms which build the browser actually loaded
 
@@ -63,7 +54,28 @@ const SIDEBAR_HIDDEN = ['staff'];
 const MOBILE_PRIMARY_PRIORITY = ['dashboard', 'members', 'finance', 'settings'];
 const LABEL = { dashboard: 'Home', members: 'Members', ministries: 'Ministries', attendance: 'Attendance', finance: 'Finance', announcements: 'Notices', programmes: 'Programmes', reports: 'Reports', staff: 'Staff', settings: 'Settings' };
 const ICON = { dashboard: 'home', members: 'members', ministries: 'church', attendance: 'attendance', finance: 'finance', announcements: 'notices', programmes: 'calendar', reports: 'reports', staff: 'staff', settings: 'settings' };
-const VIEW = { dashboard: dashboardView, members: membersView, ministries: ministriesView, attendance: attendanceView, finance: financeView, announcements: announcementsView, programmes: programmesView, reports: reportsView, staff: staffView, settings: settingsView };
+// Each tab's view module is fetched only the first time that tab is actually opened, not all
+// at once on startup — with no bundler, every statically-imported module here used to be its
+// own blocking network request before the app could even show the login screen or Dashboard.
+// A browser/webview's module loader already caches a given import() by URL on its own, so
+// switching back to a tab already visited this session resolves instantly with no re-fetch.
+const VIEW_MODULES = {
+  dashboard: ['./views/dashboard.js', 'dashboardView'],
+  members: ['./views/members.js', 'membersView'],
+  ministries: ['./views/ministries.js', 'ministriesView'],
+  attendance: ['./views/attendance.js', 'attendanceView'],
+  finance: ['./views/finance.js', 'financeView'],
+  announcements: ['./views/people.js', 'announcementsView'],
+  programmes: ['./views/programmes.js', 'programmesView'],
+  reports: ['./views/reports.js', 'reportsView'],
+  staff: ['./views/people.js', 'staffView'],
+  settings: ['./views/settings.js', 'settingsView'],
+};
+async function loadView(t) {
+  const [path, exportName] = VIEW_MODULES[t];
+  const mod = await import(path);
+  return mod[exportName];
+}
 // Sidebar section labels (HotspotHub-style uppercase "nav-title" group headers).
 // "Money", not "Finance": a group header reading "Finance" right above a tab labelled
 // "Finance" broke a `nav >> text=Finance` lookup in e2e/walkthrough.py (two matches) — and
@@ -319,7 +331,7 @@ async function render() {
     initialQuery: tab === 'members' ? pendingMemberQuery : '', initialMinistryId: (tab === 'attendance' || tab === 'finance') ? pendingMinistryId : '' };
   pendingMemberQuery = ''; pendingMinistryId = '';
   let view;
-  try { view = await VIEW[tab](ctx); } catch (e) { console.error(e); view = h('div', { class: 'card' }, h('p', { class: 'err' }, 'Something went wrong showing this screen.'), h('pre', { class: 'hint' }, String(e.message))); }
+  try { const viewFn = await loadView(tab); view = await viewFn(ctx); } catch (e) { console.error(e); view = h('div', { class: 'card' }, h('p', { class: 'err' }, 'Something went wrong showing this screen.'), h('pre', { class: 'hint' }, String(e.message))); }
   if (id !== renderId) return; // a newer render started while this one was loading
   const status = h('div', { class: 'status', role: 'status' }, h('span', { class: online ? 'dot' : 'dot off' }),
     !online ? 'Offline — changes are saved on this device' : syncing ? 'Syncing…' : lastError || 'Online',
@@ -530,7 +542,7 @@ function renderLogin() {
 }
 
 addEventListener('online', () => { online = true; sync(); });
-addEventListener('offline', () => { online = false; render(); });
+addEventListener('offline', () => { online = false; if (!isEditingPage()) render(); }); // don't wipe an in-progress form just to flip the status dot (see isEditingPage() above); it'll show on the next render regardless
 // The notification bell (see notificationBell() above), any ui.js menu() dropdown, and phone's
 // own bottom-bar "More" panel (mobileTabbar's .mobile-more, above) are all native
 // <details>/<summary> — clicking their own summary toggles them, and a full render() (e.g.

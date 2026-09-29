@@ -1,5 +1,5 @@
 import { h, byName, sum, money, today, fmtDate, monthKey, barChart, ringStat, relTime, empty, attendanceCount, signedAmount,
-  nextOccurrence, daysUntil, countdownLabel, fitLogoToBackground } from '../ui.js';
+  nextOccurrence, daysUntil, countdownLabel, fitLogoToBackground, dateKey } from '../ui.js';
 import { icon } from '../icons.js';
 import { STATUSES } from './members.js';
 
@@ -24,12 +24,12 @@ export async function dashboardView({ repo, user, ministries, members, go }) {
 
   const church = att.filter((a) => !a.ministryId).sort((a, b) => b.date.localeCompare(a.date));
   const attChart = church.slice(0, 8).reverse().map((a) => ({ label: a.date.slice(5), value: attendanceCount(a) }));
-  const months = [...Array(6)].map((_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (5 - i)); return d.toISOString().slice(0, 7); });
+  const months = [...Array(6)].map((_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - (5 - i)); return dateKey(d).slice(0, 7); }); // local month, not UTC (toISOString would shift near a month boundary)
   const giveChart = months.map((mo) => ({ label: mo.slice(5), value: sum(income(tx).filter((t) => monthKey(t.date) === mo), signedAmount) }));
 
   // this week's attendance (all services, last 7 days including today)
   const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 6);
-  const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+  const weekAgoStr = dateKey(weekAgo); // local calendar day, not UTC (see today()'s own comment in ui.js)
   const weekAttendance = sum(att.filter((a) => a.date >= weekAgoStr), attendanceCount);
 
   // members by status, one ring-with-percentage widget per status

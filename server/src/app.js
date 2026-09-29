@@ -118,6 +118,17 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
     churchProfileRec: db.prepare("SELECT * FROM records WHERE tenant_id = ? AND collection = 'settings' AND id = 'church'"),
     activeStaffCountOf: db.prepare('SELECT COUNT(*) AS n FROM users WHERE tenant_id = ? AND active = 1'),
     membersCountOf: db.prepare("SELECT COUNT(*) AS n FROM records WHERE tenant_id = ? AND collection = 'members' AND deleted = 0"),
+    // ---- password resets / staff account edits — shared by a church's own Settings and the
+    // platform admin console (both edit the same `users` table the same way) ----
+    delPasswordResetsForUser: db.prepare('DELETE FROM password_resets WHERE user_id = ?'),
+    insPasswordReset: db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?,?,?)'),
+    passwordResetByHash: db.prepare('SELECT * FROM password_resets WHERE token_hash = ?'),
+    markPasswordResetUsed: db.prepare('UPDATE password_resets SET used_at = ? WHERE token_hash = ?'),
+    userByIdAny: db.prepare('SELECT * FROM users WHERE id = ?'), // unlike q.user above, not filtered to active=1
+    userByIdAndTenant: db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?'),
+    setUserPassHash: db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?'),
+    updateUserRoleEtc: db.prepare('UPDATE users SET role = ?, ministry_ids = ?, active = ?, pass_hash = ? WHERE id = ?'),
+    updateUserProfile: db.prepare('UPDATE users SET name = ?, email = ?, photo = ? WHERE id = ?'),
   };
 
   const toUser = (row) => ({
@@ -167,9 +178,8 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
   function issueResetToken(userId) {
     const rawToken = randomBytes(32).toString('hex');
     const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-    db.prepare('DELETE FROM password_resets WHERE user_id = ?').run(userId);
-    db.prepare('INSERT INTO password_resets (token_hash, user_id, expires_at) VALUES (?,?,?)')
-      .run(tokenHash, userId, Date.now() + RESET_TOKEN_TTL_MS);
+    q.delPasswordResetsForUser.run(userId);
+    q.insPasswordReset.run(tokenHash, userId, Date.now() + RESET_TOKEN_TTL_MS);
     return rawToken;
   }
 
@@ -181,8 +191,21 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
   // caller right before this) is what makes it idempotent, since two nearly-simultaneous
   // callers could otherwise each post their own duplicate transaction.
   function finalizeGivingIntent(intent, paystackData) {
-    if (intent.status === 'paid' || paystackData.status !== 'success') return;
+    if (paystackData.status !== 'success') return;
     const txId = randomUUID();
+    // /give/status (the donor's browser polling) and this same function called from
+    // /give/webhook (Paystack's own server-to-server confirmation) can both be mid-flight for
+    // the same payment at once — each awaits its own call to verifyTransaction() first, and
+    // whichever `intent` object a caller is holding was read from the DB *before* that await, so
+    // it's stale by the time we get here; checking intent.status against it (as this used to)
+    // never actually catches the second caller. The only safe way to stay idempotent is to let
+    // SQLite's own write serialization decide exactly once who "wins": claim the intent with an
+    // UPDATE ... WHERE status != 'paid' FIRST, before recording anything — whichever call
+    // actually flips the row (there can only ever be one) is the one that proceeds to post the
+    // transaction; a caller that finds 0 rows changed knows it lost the race and stops here,
+    // before ever touching the append-only ledger.
+    const claimed = q.markGivingIntentPaid.run(txId, Date.now(), intent.id);
+    if (claimed.changes === 0) return; // already finalized — by the other caller, or earlier
     const rec = {
       id: txId, type: intent.purpose, amount: intent.amount,
       method: paystackData.channel === 'card' ? 'card' : 'mobile money',
@@ -193,7 +216,6 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
     };
     const { seq } = q.bump.get(intent.tenant_id);
     q.upsert.run(intent.tenant_id, 'transactions', txId, JSON.stringify(rec), Date.now(), 0, seq, ministryOf('transactions', rec));
-    q.markGivingIntentPaid.run(txId, Date.now(), intent.id);
   }
 
   // Marks one member present on today's whole-church attendance record — shared by both
@@ -274,11 +296,11 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       const rawToken = body.token ?? '';
       if (!rawToken || (body.password ?? '').length < 8) throw new HttpError(400, 'token and 8+ char password required');
       const tokenHash = createHash('sha256').update(rawToken).digest('hex');
-      const row = db.prepare('SELECT * FROM password_resets WHERE token_hash = ?').get(tokenHash);
+      const row = q.passwordResetByHash.get(tokenHash);
       if (!row || row.used_at || row.expires_at < Date.now())
         throw new HttpError(400, 'This reset link is invalid or has expired — request a new one.');
-      db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(body.password), row.user_id);
-      db.prepare('UPDATE password_resets SET used_at = ? WHERE token_hash = ?').run(Date.now(), tokenHash);
+      q.setUserPassHash.run(hashPassword(body.password), row.user_id);
+      q.markPasswordResetUsed.run(Date.now(), tokenHash);
       return { ok: true };
     },
 
@@ -308,7 +330,7 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
     'POST /users/update': (req, body) => {
       const u = auth(req);
       if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden');
-      const row = db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').get(body.id ?? '', u.tenantId);
+      const row = q.userByIdAndTenant.get(body.id ?? '', u.tenantId);
       if (!row) throw new HttpError(404, 'no such user');
       if (row.role === 'owner') throw new HttpError(403, 'the owner account cannot be changed here');
       const role = body.role ?? row.role;
@@ -316,7 +338,7 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       const ministryIds = body.ministryIds ?? JSON.parse(row.ministry_ids);
       if (role === 'leader' && !ministryIds.length) throw new HttpError(400, 'leader needs ministryIds');
       if (body.password != null && body.password.length < 8) throw new HttpError(400, '8+ char password required');
-      db.prepare('UPDATE users SET role = ?, ministry_ids = ?, active = ?, pass_hash = ? WHERE id = ?').run(
+      q.updateUserRoleEtc.run(
         role, JSON.stringify(role === 'leader' ? ministryIds : []), body.active === false ? 0 : 1,
         body.password ? hashPassword(body.password) : row.pass_hash, row.id);
       return { ok: true };
@@ -324,10 +346,10 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
 
     'POST /auth/change-password': (req, body) => {
       const u = auth(req);
-      const row = db.prepare('SELECT * FROM users WHERE id = ?').get(u.id);
+      const row = q.userByIdAny.get(u.id);
       if (!verifyPassword(body.current ?? '', row.pass_hash)) throw new HttpError(401, 'current password is wrong');
       if ((body.next ?? '').length < 8) throw new HttpError(400, '8+ char password required');
-      db.prepare('UPDATE users SET pass_hash = ? WHERE id = ?').run(hashPassword(body.next), u.id);
+      q.setUserPassHash.run(hashPassword(body.next), u.id);
       return { ok: true };
     },
 
@@ -344,7 +366,7 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       const clash = q.tenantByEmail.get(email);
       if (clash && clash.id !== u.id) throw new HttpError(409, 'email in use');
       const photo = 'photo' in body ? (body.photo || null) : q.user.get(u.id).photo;
-      db.prepare('UPDATE users SET name = ?, email = ?, photo = ? WHERE id = ?').run(name, email, photo, u.id);
+      q.updateUserProfile.run(name, email, photo, u.id);
       return { user: toUser(q.user.get(u.id)) };
     },
 
@@ -880,7 +902,7 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       authAdmin(req);
       const t = q.tenantById.get(body.tenantId ?? '');
       if (!t) throw new HttpError(404, 'no such church');
-      const row = db.prepare('SELECT * FROM users WHERE id = ? AND tenant_id = ?').get(body.id ?? '', t.id);
+      const row = q.userByIdAndTenant.get(body.id ?? '', t.id);
       if (!row) throw new HttpError(404, 'no such user');
       if (row.role === 'owner') throw new HttpError(403, 'the owner account cannot be changed from the admin console');
       const role = body.role ?? row.role;
@@ -888,7 +910,7 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       const ministryIds = body.ministryIds ?? JSON.parse(row.ministry_ids);
       if (role === 'leader' && !ministryIds.length) throw new HttpError(400, 'leader needs ministryIds');
       if (body.password != null && body.password.length < 8) throw new HttpError(400, '8+ char password required');
-      db.prepare('UPDATE users SET role = ?, ministry_ids = ?, active = ?, pass_hash = ? WHERE id = ?').run(
+      q.updateUserRoleEtc.run(
         role, JSON.stringify(role === 'leader' ? ministryIds : []), body.active === false ? 0 : 1,
         body.password ? hashPassword(body.password) : row.pass_hash, row.id);
       return { ok: true };
@@ -963,7 +985,7 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       return { changes, cursor, more: rows.length === limit };
     },
 
-    'GET /me': (req) => ({ user: auth(req), church: db.prepare('SELECT name FROM tenants WHERE id = ?').get(auth(req).tenantId)?.name }),
+    'GET /me': (req) => { const u = auth(req); return { user: u, church: q.tenantById.get(u.tenantId)?.name }; },
 
     'GET /health': () => ({ ok: true }),
   };

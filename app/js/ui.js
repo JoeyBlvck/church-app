@@ -13,7 +13,12 @@ export function h(tag, attrs = {}, ...kids) {
   return el;
 }
 
-export const today = () => new Date().toISOString().slice(0, 10);
+// dateKey (below) is the local-calendar-day version of this — today() is defined up here since
+// it's used throughout the file before dateKey's own definition further down, but it delegates
+// to the exact same local Date parts rather than toISOString(), which is UTC and can be a day
+// off depending on the browser's time zone (harmless in Ghana itself, UTC+0, but wrong anywhere
+// else — e.g. any time after 8pm Eastern time is already "tomorrow" in UTC).
+export const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 export const money = (n) => `${CURRENCY} ${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const byName = (a, b) => (a.name ?? '').localeCompare(b.name ?? '');
 export const sum = (xs, f = (x) => x) => xs.reduce((s, x) => s + Number(f(x) || 0), 0);

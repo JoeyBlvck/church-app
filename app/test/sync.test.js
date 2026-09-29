@@ -119,6 +119,43 @@ test('switching to another church wipes local data', async () => {
   w.server.close();
 });
 
+test('a record edited again while its own push is still in flight still ends up with the right seq \u2014 no spurious later conflict', async () => {
+  const server = createApp(openDb(), { secret: 't' });
+  await new Promise((r) => server.listen(0, r));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  let gateResolve, pushesSeen = 0;
+  const gate = new Promise((r) => { gateResolve = r; });
+  // Holds the FIRST /sync/push request open until we release it below \u2014 long enough to edit
+  // the same record again while that push is still \"in flight\", from the client's own view.
+  const fetchImpl = async (url, opts) => {
+    if (String(url).includes('/sync/push')) {
+      pushesSeen++;
+      if (pushesSeen === 1) await gate;
+    }
+    return fetch(url, opts);
+  };
+  let t = 1000;
+  const a = createRepo(memoryStore(), { baseUrl, fetchImpl, now: () => ++t }); // distinct updatedAt per save, unlike Date.now() which can collide within the same millisecond
+  await a.registerChurch({ churchName: 'G', name: 'P', email: 'p@g.org', password: 'password1' });
+  const id = await a.save('members', { name: 'Kofi v1' });
+
+  const firstSync = a.sync(); // its push request is now hanging on `gate`
+  await a.save('members', { id, name: 'Kofi v2' }); // edited again before that push resolves
+  gateResolve(); // let the v1 push go through server-side
+  await firstSync;
+
+  // v1 made it to the server and got a real seq there, but v2 is what's still dirty locally.
+  assert.equal((await a.get('members', id)).name, 'Kofi v2');
+  assert.equal(await a.pending(), 1);
+
+  const r = await a.sync(); // pushes v2 \u2014 must NOT come back as a spurious conflict against v1
+  assert.equal(r.conflicted, 0);
+  assert.equal(r.pushed, 1);
+  assert.equal((await a.get('members', id)).name, 'Kofi v2');
+  assert.equal(await a.pending(), 0);
+  server.close();
+});
+
 test('resync drops stale local copies (e.g. leader moved out of a ministry)', async () => {
   const w = await world();
   const admin = w.device(), leader = w.device();
