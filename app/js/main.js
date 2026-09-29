@@ -1,7 +1,7 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
 import { API_URL, isTauri } from './config.js';
-import { checkForUpdate } from './updater.js';
+import { checkForUpdate, signOutIfInstalledOutsideUpdater } from './updater.js';
 import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo } from './ui.js';
 import { icon } from './icons.js';
 
@@ -618,4 +618,9 @@ setInterval(() => { sync(); }, 60_000);
 // checked here on every app open, and again every few hours in case the app is just left running
 // for days, rather than only ever on the 'online' trigger above.
 setInterval(() => { checkForUpdate(); }, 4 * 60 * 60_000);
-render().then(() => { sync(); checkForUpdate(); });
+// Runs before the very first render(): if this build wasn't reached through the in-app updater
+// above (someone instead ran a freshly downloaded installer by hand), and this device has a
+// signed-in session left over from whatever it had before, that session is cleared first -- see
+// updater.js's own note on why. render() itself is what shows the sign-in screen once there's no
+// session for it to find.
+signOutIfInstalledOutsideUpdater(repo).then(() => render().then(() => { sync(); checkForUpdate(); }));
