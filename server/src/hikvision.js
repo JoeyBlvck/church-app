@@ -59,6 +59,7 @@ const PAGE_SIZE = 30, MAX_PAGES = 50; // 1500 events per poll is far beyond what
 
 export async function fetchAcsEvents({ baseUrl, username, password, startTime, endTime, fetchImpl = globalThis.fetch }) {
   const events = [];
+  let fetched = 0;
   for (let page = 0; page < MAX_PAGES; page++) {
     const json = await digestRequest({
       baseUrl, path: '/ISAPI/AccessControl/AcsEvent?format=json', method: 'POST', username, password, fetchImpl,
@@ -69,10 +70,20 @@ export async function fetchAcsEvents({ baseUrl, username, password, startTime, e
       // person check-in (no employeeNoString/time), so asking for every type here is safe.
       body: { AcsEventCond: { searchID: randomBytes(8).toString('hex'), searchResultPosition: page * PAGE_SIZE, maxResults: PAGE_SIZE, major: 0, minor: 0, startTime, endTime } },
     });
-    const batch = parseAcsEvents(json);
-    events.push(...batch);
-    const total = json?.AcsEvent?.numOfMatches ?? json?.AcsEvent?.totalMatches ?? batch.length;
-    if (batch.length < PAGE_SIZE || events.length >= total) break;
+    // Pagination must be driven off the device's RAW page (InfoList.length / totalMatches),
+    // never off parseAcsEvents()'s filtered output -- confirmed against a real
+    // DS-K1T344MBFWX-E1, whose logs are mostly non-check-in noise (door/system events with no
+    // employeeNoString). A page that's entirely noise still filters down to an empty batch,
+    // and stopping on that (as this used to) silently drops every later page -- which is
+    // exactly how a real clock-in got missed here. Likewise totalMatches (the grand total
+    // across ALL pages) must be checked before numOfMatches (just this page's count): the
+    // device returns both at once, and preferring numOfMatches made the loop think page one
+    // was the whole result set whenever there was more than a page of events.
+    const rawList = json?.AcsEvent?.InfoList ?? json?.InfoList ?? [];
+    events.push(...parseAcsEvents(json));
+    fetched += rawList.length;
+    const total = json?.AcsEvent?.totalMatches ?? json?.AcsEvent?.numOfMatches ?? rawList.length;
+    if (rawList.length < PAGE_SIZE || fetched >= total) break;
   }
   return events;
 }
@@ -114,15 +125,19 @@ export function matchEventsToMembers(events, members) {
 // on the exact field names (`employeeNo`, `name`) if anything looks off.
 export async function fetchEnrolledUsers({ baseUrl, username, password, fetchImpl = globalThis.fetch }) {
   const users = [];
+  let fetched = 0;
   for (let page = 0; page < MAX_PAGES; page++) {
     const json = await digestRequest({
       baseUrl, path: '/ISAPI/AccessControl/UserInfo/Search?format=json', method: 'POST', username, password, fetchImpl,
       body: { UserInfoSearchCond: { searchID: randomBytes(8).toString('hex'), searchResultPosition: page * PAGE_SIZE, maxResults: PAGE_SIZE } },
     });
-    const batch = parseUserInfoSearch(json);
-    users.push(...batch);
-    const total = json?.UserInfoSearch?.numOfMatches ?? json?.UserInfoSearch?.totalMatches ?? batch.length;
-    if (batch.length < PAGE_SIZE || users.length >= total) break;
+    // Same pagination fix as fetchAcsEvents above: drive off the raw page/totalMatches, not
+    // the filtered batch/numOfMatches -- see the comment there for why.
+    const rawList = json?.UserInfoSearch?.UserInfo ?? json?.UserInfo ?? [];
+    users.push(...parseUserInfoSearch(json));
+    fetched += rawList.length;
+    const total = json?.UserInfoSearch?.totalMatches ?? json?.UserInfoSearch?.numOfMatches ?? rawList.length;
+    if (rawList.length < PAGE_SIZE || fetched >= total) break;
   }
   return users;
 }

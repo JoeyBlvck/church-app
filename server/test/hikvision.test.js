@@ -30,8 +30,11 @@ function fakeDevice(username, password, pages) {
     req.on('end', () => {
       const pos = JSON.parse(body).AcsEventCond.searchResultPosition;
       const page = pages[pos / 30] ?? { InfoList: [] };
+      // Mirrors a real device's response shape: totalMatches is the grand total across ALL
+      // pages, numOfMatches is only how many are in THIS page -- the two differ whenever
+      // there's more than one page, which is exactly what caught the pagination bug.
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
-        AcsEvent: { numOfMatches: pages.flatMap((p) => p.InfoList).length, InfoList: page.InfoList },
+        AcsEvent: { totalMatches: pages.flatMap((p) => p.InfoList).length, numOfMatches: page.InfoList.length, InfoList: page.InfoList },
       }));
     });
   });
@@ -63,6 +66,22 @@ test('fetchAcsEvents pages through multiple result pages', async () => {
   server.close();
 });
 
+test('fetchAcsEvents keeps paging past a page that is entirely non-check-in noise', async () => {
+  // A real DS-K1T344MBFWX-E1's log is mostly door/system events with no employeeNoString --
+  // parseAcsEvents() filters those out, so a full page of them filters down to an EMPTY
+  // batch. Pagination must keep going anyway (this is the exact bug that made a real
+  // clock-in vanish: the old code stopped as soon as the filtered batch looked "short").
+  const page0 = { InfoList: Array.from({ length: 30 }, (_, i) => ({ time: `2026-09-22T08:${String(i).padStart(2, '0')}:00+00:00` /* no employeeNoString */ })) };
+  const page1 = { InfoList: [{ time: '2026-09-22T09:00:00+00:00', employeeNoString: '2', name: 'Joel' }] };
+  const { server } = fakeDevice('admin', 'pw', [page0, page1]);
+  await new Promise((r) => server.listen(0, r));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const events = await fetchAcsEvents({ baseUrl, username: 'admin', password: 'pw', startTime: 'x', endTime: 'y' });
+  assert.deepEqual(events, [{ deviceUserId: '2', time: '2026-09-22T09:00:00+00:00', name: 'Joel' }]);
+  server.close();
+});
+
 test('parseAcsEvents is defensive about missing/odd fields', () => {
   assert.deepEqual(parseAcsEvents({}), []);
   assert.deepEqual(parseAcsEvents({ AcsEvent: { InfoList: [{ time: 't1', employeeNoString: '5' }, { time: 't2' }, { employeeNoString: '9' }] } }),
@@ -90,7 +109,7 @@ function fakeUserDevice(pages) {
       const pos = JSON.parse(body).UserInfoSearchCond.searchResultPosition;
       const page = pages[pos / 30] ?? { UserInfo: [] };
       res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({
-        UserInfoSearch: { numOfMatches: pages.flatMap((p) => p.UserInfo).length, UserInfo: page.UserInfo },
+        UserInfoSearch: { totalMatches: pages.flatMap((p) => p.UserInfo).length, numOfMatches: page.UserInfo.length, UserInfo: page.UserInfo },
       }));
     });
   });
