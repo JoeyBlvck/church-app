@@ -62,7 +62,12 @@ export async function fetchAcsEvents({ baseUrl, username, password, startTime, e
   for (let page = 0; page < MAX_PAGES; page++) {
     const json = await digestRequest({
       baseUrl, path: '/ISAPI/AccessControl/AcsEvent?format=json', method: 'POST', username, password, fetchImpl,
-      body: { AcsEventCond: { searchID: randomBytes(8).toString('hex'), searchResultPosition: page * PAGE_SIZE, maxResults: PAGE_SIZE, startTime, endTime } },
+      // major: 0, minor: 0 means "every event type" -- confirmed necessary against a real
+      // DS-K1T344MBFWX-E1 (MinMoe) unit: without them the device rejects the request outright
+      // with a MessageParametersLack/"Invalid Content" error, even though Hikvision's own docs
+      // list them as optional. parseAcsEvents() below already drops anything that isn't a
+      // person check-in (no employeeNoString/time), so asking for every type here is safe.
+      body: { AcsEventCond: { searchID: randomBytes(8).toString('hex'), searchResultPosition: page * PAGE_SIZE, maxResults: PAGE_SIZE, major: 0, minor: 0, startTime, endTime } },
     });
     const batch = parseAcsEvents(json);
     events.push(...batch);
