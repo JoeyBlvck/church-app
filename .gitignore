@@ -18,6 +18,11 @@ npm-debug.log*
 .env
 .env.local
 
+# Hikvision clock-in bridge config -- holds the device admin password and the bridge
+# account's login; server/hikvision.config.example.json is the template that stays in git.
+server/hikvision.config.json
+server/.hikvision-state.json
+
 # Editor
 .vscode/
 .idea/
