@@ -34,6 +34,20 @@ import { fetchAcsEvents, matchEventsToMembers } from './src/hikvision.js';
 // convert to the device's local wall-clock time instead of just truncating UTC.
 const toDeviceTime = (isoOrDate) => (isoOrDate instanceof Date ? isoOrDate.toISOString() : isoOrDate).slice(0, 19);
 
+// Which service name a batch of check-ins files under varies by day of the week -- most
+// churches' only clock-in-tracked gathering to start is Sunday service, but a config can list
+// more (config.servicesByDay maps a lowercase weekday name to a service name -- keep these
+// matching app/js/views/attendance.js's own SERVICES list so they show up as recognized
+// options there instead of one-off custom entries). A day not listed falls back to
+// config.service, and that in turn falls back to a generic "Clock-in" if config doesn't set it
+// either (unchanged from before this existed). dateStr is a plain "YYYY-MM-DD" (as produced by
+// nowISO.slice(0, 10) below) -- read as UTC so this doesn't depend on the polling machine's own
+// time zone.
+export function serviceFor(dateStr, config) {
+  const dayName = new Date(`${dateStr}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }).toLowerCase();
+  return config.servicesByDay?.[dayName] ?? config.service ?? 'Clock-in';
+}
+
 const here = dirname(fileURLToPath(import.meta.url));
 const args = new Set(process.argv.slice(2));
 
@@ -66,7 +80,7 @@ async function pollOnce(config, repo, store) {
     const { presentIds, unmatched } = matchEventsToMembers(events, members);
     if (unmatched.length) console.warn(`Clock-in IDs not linked to any member (add these in Members → Edit → "Clock-in device ID"): ${unmatched.join(', ')}`);
     if (presentIds.length) {
-      const date = nowISO.slice(0, 10), service = config.service ?? 'Clock-in';
+      const date = nowISO.slice(0, 10), service = serviceFor(date, config);
       const existing = (await repo.list('attendance')).find((a) => a.date === date && a.service === service && !a.ministryId);
       const merged = new Set([...(existing?.presentIds ?? []), ...presentIds]);
       await repo.save('attendance', { ...existing, date, service, presentIds: [...merged] });

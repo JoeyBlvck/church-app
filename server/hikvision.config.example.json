@@ -9,7 +9,10 @@
     "email": "clockin@yourchurch.org",
     "password": "a-password-for-the-clock-in-account"
   },
-  "service": "Sunday service",
+  "service": "Midweek service",
+  "servicesByDay": {
+    "sunday": "Sunday service"
+  },
   "pollSeconds": 30,
   "stateFile": ".hikvision-state.json"
 }

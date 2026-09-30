@@ -9,7 +9,7 @@ import { createApp } from '../src/app.js';
 import { fileStore } from '../src/fileStore.js';
 import { createRepo } from '../../app/js/sync.js';
 import { memoryStore } from '../../app/js/store.js';
-import { pollOnce } from '../hikvision-bridge.js';
+import { pollOnce, serviceFor } from '../hikvision-bridge.js';
 
 // A device fake that always accepts (digest auth itself is covered in hikvision.test.js) —
 // this test is about the bridge's own logic: matching events to members and recording
@@ -63,4 +63,19 @@ test('bridge: matches clock-in events to members and records attendance idempote
 
   await rm(dir, { recursive: true, force: true });
   chServer.close(); device.close();
+});
+
+test('serviceFor: picks the service by day of week, falling back to config.service then "Clock-in"', () => {
+  // 2026-09-27 is a Sunday, 2026-09-30 a Wednesday (UTC) -- fixed dates so this doesn't depend
+  // on whatever day the test happens to run.
+  const config = { servicesByDay: { sunday: 'Sunday service', wednesday: 'Bible study' }, service: 'Midweek service' };
+  assert.equal(serviceFor('2026-09-27', config), 'Sunday service');
+  assert.equal(serviceFor('2026-09-30', config), 'Bible study');
+  // Tuesday isn't in servicesByDay -- falls back to config.service.
+  assert.equal(serviceFor('2026-09-29', config), 'Midweek service');
+  // No servicesByDay at all -- config.service applies to every day.
+  assert.equal(serviceFor('2026-09-27', { service: 'Sunday service' }), 'Sunday service');
+  assert.equal(serviceFor('2026-09-29', { service: 'Sunday service' }), 'Sunday service');
+  // Neither set -- generic default.
+  assert.equal(serviceFor('2026-09-29', {}), 'Clock-in');
 });
