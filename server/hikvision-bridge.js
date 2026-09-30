@@ -25,6 +25,15 @@ import { createRepo } from '../app/js/sync.js';
 import { fileStore } from './src/fileStore.js';
 import { fetchAcsEvents, matchEventsToMembers } from './src/hikvision.js';
 
+// The device rejects startTime/endTime with milliseconds or a "Z" suffix (confirmed
+// against a real DS-K1T344MBFWX-E1) -- it wants a bare "YYYY-MM-DDTHH:mm:ss", read as the
+// device's own configured local time. Internal timestamps everywhere else in this file stay
+// full ISO (UTC) as before; this only reformats what actually goes out over the wire. This
+// assumes the device's configured time zone is UTC (true for Ghana, which The ChurchFlow is
+// built for and never observes DST) -- a deployment in another time zone would need this to
+// convert to the device's local wall-clock time instead of just truncating UTC.
+const toDeviceTime = (isoOrDate) => (isoOrDate instanceof Date ? isoOrDate.toISOString() : isoOrDate).slice(0, 19);
+
 const here = dirname(fileURLToPath(import.meta.url));
 const args = new Set(process.argv.slice(2));
 
@@ -39,7 +48,7 @@ async function probe(config) {
   const startOfDay = new Date(now); startOfDay.setHours(0, 0, 0, 0);
   const events = await fetchAcsEvents({
     baseUrl: config.device.host, username: config.device.username, password: config.device.password,
-    startTime: startOfDay.toISOString(), endTime: now.toISOString(),
+    startTime: toDeviceTime(startOfDay), endTime: toDeviceTime(now),
   });
   console.log(`Fetched ${events.length} event(s) from the device today:`);
   console.log(JSON.stringify(events, null, 2));
@@ -51,7 +60,7 @@ async function pollOnce(config, repo, store) {
   const nowISO = new Date().toISOString();
   const since = (await store.getMeta('hikvisionSince')) ?? new Date().toISOString().slice(0, 10) + 'T00:00:00.000Z';
 
-  const events = await fetchAcsEvents({ baseUrl: config.device.host, username: config.device.username, password: config.device.password, startTime: since, endTime: nowISO });
+  const events = await fetchAcsEvents({ baseUrl: config.device.host, username: config.device.username, password: config.device.password, startTime: toDeviceTime(since), endTime: toDeviceTime(nowISO) });
   if (events.length) {
     const members = await repo.list('members');
     const { presentIds, unmatched } = matchEventsToMembers(events, members);
