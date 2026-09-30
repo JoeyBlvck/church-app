@@ -1,7 +1,7 @@
 import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, barChart, attendanceCount, attendanceChecklist, bulkBar, sum, download, toCsv, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { parseCSV } from '../csv.js';
-import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, attendanceTargetForDay } from '../importers.js';
+import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, attendanceTargetForDay, dayNameFor } from '../importers.js';
 
 // Exported so ministries.js's own inline attendance panel (take/edit/delete a ministry's own
 // attendance without leaving the ministry) can offer the same service datalist.
@@ -17,6 +17,12 @@ let sortDir = 'desc'; // 'desc' = newest date first, 'asc' = oldest first
 let pageSize = 20;
 let currentPage = 1;
 let expandedDates = new Set();
+// 'all' | 'sunday' | 'weekday' — which record IS a Sunday record is decided purely from the
+// record's own date (dayNameFor, the same calendar-based day-of-week check the Hikvision bridge
+// and CSV import use), never from what its `service` name happens to say — a record can be
+// named "Sunday service" and still get filed here as a weekday record if its date isn't
+// actually a Sunday, and that's deliberate: the filter reflects the calendar, not a label.
+let dayGroup = 'all';
 
 export async function attendanceView({ repo, user, ministries, members, rerender, initialMinistryId = '' }) {
   const [recsRaw, churchName, settingsList] = await Promise.all([repo.list('attendance'), repo.churchName(), repo.list('settings')]);
@@ -156,9 +162,13 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     for (const id of ids) await repo.remove('attendance', id);
     toast(`${ids.length} attendance record${ids.length === 1 ? '' : 's'} deleted`); rerender();
   } }]);
+  const DAY_GROUPS = [['all', 'All'], ['sunday', 'Sundays'], ['weekday', 'Weekdays']];
   const drawTable = () => {
     const ministryMemberIds = ministryFilter ? new Set(members.filter((m) => m.ministryIds?.includes(ministryFilter)).map((m) => m.id)) : null;
-    const rows = recs.filter((r) => !ministryFilter || r.ministryId === ministryFilter || !r.ministryId);
+    // Sunday vs. weekday is read straight off each record's own date (dayNameFor), never off its
+    // `service` text — see the note by `dayGroup` above.
+    const rows = recs.filter((r) => (!ministryFilter || r.ministryId === ministryFilter || !r.ministryId)
+      && (dayGroup === 'all' || (dayNameFor(r.date) === 'Sunday') === (dayGroup === 'sunday')));
     const heads = ['Service', 'For', 'Total', 'Late', 'Excused', ...(ministryMemberIds ? [`${mName[ministryFilter] ?? 'Ministry'} present`] : [])];
 
     // ---- group into one fold per date, newest (or oldest) date first ----
@@ -174,11 +184,12 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     const pageGroups = dateGroups.slice((currentPage - 1) * pageSize, currentPage * pageSize);
     const pageRows = pageGroups.flatMap(([, dayRecs]) => dayRecs);
 
-    // Export CSV / PDF — scoped to the current ministry filter but every matching record
-    // across every page, not just what's currently on screen (a report that silently dropped
-    // whatever page you weren't looking at would be worse than no export at all).
-    const scope = ministryFilter ? mName[ministryFilter] ?? 'Ministry' : 'Whole church';
-    const exportCsv = () => download(`attendance-${scope.toLowerCase().replace(/\s+/g, '-')}.csv`, toCsv([['date', 'service', 'for', 'total present', 'late', 'excused', ...(ministryMemberIds ? [`${scope} present`] : [])],
+    // Export CSV / PDF — scoped to the current ministry AND day-group filters, but every
+    // matching record across every page, not just what's currently on screen (a report that
+    // silently dropped whatever page you weren't looking at would be worse than no export at all).
+    const scope = (ministryFilter ? mName[ministryFilter] ?? 'Ministry' : 'Whole church')
+      + (dayGroup === 'sunday' ? ' — Sundays' : dayGroup === 'weekday' ? ' — Weekdays' : '');
+    const exportCsv = () => download(`attendance-${scope.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.csv`, toCsv([['date', 'service', 'for', 'total present', 'late', 'excused', ...(ministryMemberIds ? [`${scope} present`] : [])],
       ...rows.map((r) => [r.date, r.service, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church', attendanceCount(r), (r.lateIds ?? []).length, (r.excusedIds ?? []).length,
         ...(ministryMemberIds ? [(r.presentIds ?? []).filter((id) => ministryMemberIds.has(id)).length] : [])])]), 'text/csv');
     const printHead = pdfHeader(churchName, cs, `Attendance report — ${scope}`,
@@ -189,6 +200,9 @@ export async function attendanceView({ repo, user, ministries, members, rerender
         h('td', {}, fmtDate(r.date)), h('td', {}, r.service), h('td', {}, r.ministryId ? mName[r.ministryId] ?? '' : 'Whole church'), h('td', {}, attendanceCount(r)),
         h('td', {}, (r.lateIds ?? []).length), h('td', {}, (r.excusedIds ?? []).length),
         ministryMemberIds && h('td', {}, (r.presentIds ?? []).filter((id) => ministryMemberIds.has(id)).length)))));
+
+    const dayTabs = h('div', { class: 'tabs' }, DAY_GROUPS.map(([key, label]) => h('button', { type: 'button', class: `tab ${dayGroup === key ? 'on' : ''}`,
+      onclick: () => { dayGroup = key; currentPage = 1; drawTable(); } }, label)));
 
     const controls = h('div', { class: 'filters' },
       !isLeader && ministries.length > 0 && h('select', { onchange: (e) => { ministryFilter = e.target.value; currentPage = 1; drawTable(); } },
@@ -224,9 +238,11 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     // replaceChildren() is a native DOM method — it has no such filtering, and stringifies a
     // falsy non-node argument into a literal "false" text node instead of just omitting it.
     tableCard.replaceChildren(printHead, printTable, h('div', { class: 'noprint' }, ...[
+      dayTabs,
       controls,
       rows.length && sel.bar,
-      dateFolds.length ? h('div', {}, dateFolds) : empty(ministryFilter ? 'No attendance recorded for this ministry yet.' : 'No attendance recorded yet.'),
+      dateFolds.length ? h('div', {}, dateFolds) : empty(ministryFilter ? 'No attendance recorded for this ministry yet.'
+        : dayGroup === 'sunday' ? 'No Sunday attendance recorded yet.' : dayGroup === 'weekday' ? 'No weekday attendance recorded yet.' : 'No attendance recorded yet.'),
       pager,
     ].filter(Boolean)));
     sel.sync(pageRows.map((r) => r.id));
