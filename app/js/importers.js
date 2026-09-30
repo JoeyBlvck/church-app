@@ -196,7 +196,9 @@ export function planHikvisionImport(entries, members) {
 // specific gathering someone actually attended, so a day with no ministry meeting scheduled at
 // all has nothing to attribute a check-in to -- attendanceTargetForDay returns null for that,
 // meaning "skip this day's check-ins", not "file them under some generic guess".
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// Exported so the Attendance view (app/js/views/attendance.js) can build its own per-day filter
+// tabs in calendar order, rather than keeping a second copy of this list.
+export const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 // Mirrors ministries.js's own (unexported) meetDaysOf: meetDays (plural) is the current field;
 // meetDay (singular) is read as a one-day meetDays for a ministry saved before meetDays existed.
