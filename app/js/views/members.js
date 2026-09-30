@@ -54,21 +54,29 @@ export function memberForm({ repo, user, ministries, households, member = {}, on
       householdId, notes: val(f, 'notes'), ministryIds, deviceUserId: val(f, 'deviceUserId') || undefined, photo: photo ?? undefined });
     toast(member.id ? 'Member updated' : 'Member added'); onDone?.(id);
   } },
-    photoPicker(photo, (p) => { photo = p; }, { round: true, label: 'Passport picture' }),
+    photoPicker(photo, (p) => { photo = p; }, { round: true, label: 'Passport picture (optional)' }),
+    h('p', { class: 'hint' }, '* Required — everything else is optional.'),
     h('div', { class: 'row' },
-      field('Full name', h('input', { name: 'name', required: true, value: member.name ?? '', autocomplete: 'off' })),
-      field('Phone', h('input', { name: 'phone', type: 'tel', value: member.phone ?? '', placeholder: '024 123 4567' })),
-      field('Email', h('input', { name: 'email', type: 'email', value: member.email ?? '' })),
-      field('Gender', h('select', { name: 'gender' }, opts(GENDERS.map((g) => [g, g || '—']), member.gender ?? ''))),
-      field('Birthday', h('input', { name: 'birthday', type: 'date', value: member.birthday ?? '' })),
+      field('Full name *', h('input', { name: 'name', required: true, value: member.name ?? '', autocomplete: 'off' })),
+      field('Phone (optional)', h('input', { name: 'phone', type: 'tel', value: member.phone ?? '', placeholder: '024 123 4567' })),
+      field('Email (optional)', h('input', { name: 'email', type: 'email', value: member.email ?? '' })),
+      field('Gender (optional)', h('select', { name: 'gender' }, opts(GENDERS.map((g) => [g, g || '—']), member.gender ?? ''))),
+      field('Birthday (optional)', h('input', { name: 'birthday', type: 'date', value: member.birthday ?? '' })),
+      // Status/Date joined are technically optional (both come pre-filled with a sensible
+      // default -- 'member' and today -- so there's nothing to leave blank), unlike the fields
+      // above/below that submit empty when untouched. Left unlabeled rather than "(optional)"
+      // for that reason, and unlike "*" fields they're never blocked at submit.
       field('Status', h('select', { name: 'status' }, opts(STATUSES, member.status ?? 'member'))),
       field('Date joined', h('input', { name: 'joined', type: 'date', value: member.joined ?? today() })),
-      !isLeader && field('Household / family', h('select', { name: 'householdId' }, h('option', { value: '' }, '— none —'), opts(households.slice().sort(byName).map((x) => [x.id, x.name]), member.householdId))),
-      !isLeader && field('…or new household', h('input', { name: 'newHousehold', placeholder: 'e.g. Mensah family' })),
-      !isLeader && field('Address', h('input', { name: 'address', value: households.find((x) => x.id === member.householdId)?.address ?? '' })),
-      field('Clock-in device ID', h('input', { name: 'deviceUserId', value: member.deviceUserId ?? '', placeholder: 'e.g. 1024' }), 'The person/employee number this member is enrolled as on the attendance clock-in device.')),
-    field('Ministries', h('div', {}, boxes.length ? boxes : h('span', { class: 'hint' }, 'No ministries yet.'))),
-    field('Notes', h('textarea', { name: 'notes', rows: 2 }, member.notes ?? '')),
+      !isLeader && field('Household / family (optional)', h('select', { name: 'householdId' }, h('option', { value: '' }, '— none —'), opts(households.slice().sort(byName).map((x) => [x.id, x.name]), member.householdId))),
+      !isLeader && field('…or new household (optional)', h('input', { name: 'newHousehold', placeholder: 'e.g. Mensah family' })),
+      !isLeader && field('Address (optional)', h('input', { name: 'address', value: households.find((x) => x.id === member.householdId)?.address ?? '' })),
+      field('Clock-in device ID (optional)', h('input', { name: 'deviceUserId', value: member.deviceUserId ?? '', placeholder: 'e.g. 1024' }), 'The person/employee number this member is enrolled as on the attendance clock-in device.')),
+    // Ministries is the one field whose required-ness depends on who's filling the form out: a
+    // leader can only add/edit members within their own ministries, so it's enforced (see the
+    // onsubmit check above) for them specifically, and left optional for everyone else.
+    field(isLeader ? 'Ministries *' : 'Ministries (optional)', h('div', {}, boxes.length ? boxes : h('span', { class: 'hint' }, 'No ministries yet.'))),
+    field('Notes (optional)', h('textarea', { name: 'notes', rows: 2 }, member.notes ?? '')),
     h('p', { class: 'actions' }, h('button', { class: 'btn' }, member.id ? 'Save changes' : 'Add member')));
   return f;
 }
