@@ -164,6 +164,24 @@ If attendance is taken with a Hikvision face/fingerprint/card terminal, `server/
 
 **Service name varies by day.** Every check-in in a given poll is attributed to whatever service that calendar day maps to: set `"servicesByDay"` in the config to a `{"sunday": "Sunday service", "wednesday": "Bible study"}`-style object (weekday names, lowercase, in the config's own time zone — see the config example), and any day not listed there falls back to the plain `"service"` value (e.g. `"Midweek service"`). If the device also picks up check-ins for something unrelated on a day that's already mapped to something else, either run the bridge only while that specific gathering is happening, or stop/restart it with a different `service` value for the day. A device ID that doesn't match any member is logged to the console so the office can fix it, but doesn't block anyone else's check-in from being recorded.
 
+**Running it unattended (macOS background service).** Typing `node server/hikvision-bridge.js` and leaving a Terminal window open works, but it stops the moment that window closes or the Mac restarts. To have it start on its own and keep running:
+1. Find node's install path: `which node` in Terminal.
+2. Copy `server/com.churchflow.hikvision-bridge.plist.example` to `server/com.churchflow.hikvision-bridge.plist` (gitignored — it bakes in this machine's own paths) and fill in the three placeholders: node's path from step 1, and this checkout's absolute folder path (wherever `church-app` lives on this Mac) wherever it appears.
+3. Install and start it:
+   ```bash
+   cp server/com.churchflow.hikvision-bridge.plist ~/Library/LaunchAgents/
+   launchctl load ~/Library/LaunchAgents/com.churchflow.hikvision-bridge.plist
+   ```
+   It's now running, and will start again automatically every time this Mac logs in — no need to open a Terminal or remember to start it before a service.
+4. Check on it any time: `tail -f server/hikvision-bridge.log` (and `hikvision-bridge.error.log` if something's wrong).
+5. To stop it (e.g. before changing `hikvision.config.json`): `launchctl unload ~/Library/LaunchAgents/com.churchflow.hikvision-bridge.plist`, make the change, then `launchctl load` again to restart it.
+
+This machine must stay powered on and connected to the same network as the clock-in device whenever attendance should be captured — a laptop that's closed or asleep, or off the church's WiFi, can't poll the device. See "Doing this at the church" below for what that means in practice.
+
+**Doing this at the church.** The bridge only works while it's running on a computer that's on the *same local network* as the clock-in device — it can't reach the device over the internet. In practice that means: bring (or permanently keep) a computer at the church, join it to the same WiFi/network the terminal is on, and either leave a Terminal window open running the bridge during the service, or set it up as the background service above so it's always on. If the church's network is different from wherever the device was tested (a different WiFi network has a different address range), check the device's IP again from its own network settings screen once it's on the church's network, and update `"host"` in `hikvision.config.json` to match — a DHCP reservation on the church's router keeps that address from changing later.
+
+If keeping a computer running continuously at the church isn't practical, there's a simpler manual alternative that needs no background service and no network reachability at all beyond a one-time file transfer: the device's own web interface (or its bundled configuration software) can export its full check-in log as a CSV file (often named something like `recordListAutoRecovered_*.csv`). Uploading that file in the app's **Attendance** page (the "Upload attendance spreadsheet" card) is recognized automatically as a Hikvision device log and imports one attendance record per day it covers — it can even create member records for anyone the device recognizes who isn't registered yet, and backfills Clock-in device IDs for existing members matched by name. This is the "do it after the fact, no live bridge needed" option; the live bridge above is the "attendance shows up automatically, in real time" option. They're not mutually exclusive — the manual upload is also a good way to backfill history from before the bridge was set up.
+
 ### Pulling the device's enrolled-user list, as a spreadsheet to review
 
 Separately from the bridge above (which pulls *check-in events*), Settings → **Clock-in device** → "Pull enrolled users from device" pulls the device's *enrolled* name/person-ID list — the roster it already knows, from however it was enrolled (face/fingerprint/card) — so the office can turn it into member records without retyping names.

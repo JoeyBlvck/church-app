@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for running the Hikvision clock-in bridge as a macOS background service, so it
+  starts on its own at login and keeps running without a Terminal window open. This is a
+  TEMPLATE -- copy it to com.churchflow.hikvision-bridge.plist (gitignored, since the paths
+  below are specific to this one machine) and fill in the three placeholders:
+
+    /ABSOLUTE/PATH/TO/node        -- run `which node` in Terminal to find this
+    /ABSOLUTE/PATH/TO/church-app  -- wherever this checkout lives on this Mac, e.g.
+                                      /Users/yourname/Downloads/church-app
+
+  See README.md's "Hikvision clock-in integration" section for the full install steps
+  (copying this into ~/Library/LaunchAgents and loading it with launchctl).
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.churchflow.hikvision-bridge</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/ABSOLUTE/PATH/TO/node</string>
+        <string>/ABSOLUTE/PATH/TO/church-app/server/hikvision-bridge.js</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/ABSOLUTE/PATH/TO/church-app</string>
+    <!-- Starts the bridge as soon as this is loaded, and again every time this Mac logs in. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- Restarts the bridge automatically if it ever exits/crashes (e.g. the WiFi drops
+         mid-poll) -- the script's own poll loop already retries a single failed poll, this is
+         the outer safety net for the process itself dying. -->
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/ABSOLUTE/PATH/TO/church-app/server/hikvision-bridge.log</string>
+    <key>StandardErrorPath</key>
+    <string>/ABSOLUTE/PATH/TO/church-app/server/hikvision-bridge.error.log</string>
+</dict>
+</plist>

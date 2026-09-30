@@ -23,6 +23,14 @@ npm-debug.log*
 server/hikvision.config.json
 server/.hikvision-state.json
 
+# Hikvision bridge's macOS background-service file -- bakes in this machine's own absolute
+# paths (node's install location, this checkout's own folder), so it's specific to whoever set
+# it up here; server/com.churchflow.hikvision-bridge.plist.example is the template that stays
+# in git. Its log files land next to it and are equally machine-specific.
+server/com.churchflow.hikvision-bridge.plist
+server/hikvision-bridge.log
+server/hikvision-bridge.error.log
+
 # Editor
 .vscode/
 .idea/
