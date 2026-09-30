@@ -186,3 +186,37 @@ export function planHikvisionImport(entries, members) {
     toBackfill: [...toBackfill.entries()].map(([id, deviceUserId]) => ({ id, deviceUserId })),
   };
 }
+
+// ---- attributing a clock-in day to a service/ministry ----
+// Shared by the live Hikvision bridge (server/hikvision-bridge.js) and the CSV device-log
+// import above, so a check-in is filed the same way whichever path recorded it: Sunday is
+// always the whole church's main service, and every other day is attributed to whichever
+// ministry has that day in its own meeting schedule (set on the ministry's own page --
+// app/js/views/ministries.js's meetDays). A shared clock-in device has no way to know which
+// specific gathering someone actually attended, so a day with no ministry meeting scheduled at
+// all has nothing to attribute a check-in to -- attendanceTargetForDay returns null for that,
+// meaning "skip this day's check-ins", not "file them under some generic guess".
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+// Mirrors ministries.js's own (unexported) meetDaysOf: meetDays (plural) is the current field;
+// meetDay (singular) is read as a one-day meetDays for a ministry saved before meetDays existed.
+const meetDaysOf = (m) => (m.meetDays?.length ? m.meetDays : m.meetDay ? [m.meetDay] : []);
+
+// dateStr is always a plain "YYYY-MM-DD" here (attendance records, the bridge's own polling
+// window, and this import all agree on that format) -- read as UTC so this doesn't depend on
+// whatever time zone the machine running it happens to be in.
+export function dayNameFor(dateStr) {
+  return DAY_NAMES[new Date(`${dateStr}T00:00:00Z`).getUTCDay()];
+}
+
+export function attendanceTargetForDay(dateStr, ministries, { sundayService = 'Sunday service' } = {}) {
+  const day = dayNameFor(dateStr);
+  if (day === 'Sunday') return { ministryId: undefined, service: sundayService };
+  const meeting = ministries.filter((m) => meetDaysOf(m).includes(day));
+  if (!meeting.length) return null;
+  // More than one ministry scheduled the same day -- pick one deterministically (alphabetically
+  // by name) rather than recording it under all of them (double-counts anyone who only went to
+  // one) or dropping the day entirely (loses a real meeting's attendance).
+  const [m] = meeting.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+  return { ministryId: m.id, service: `${m.name} meeting` };
+}

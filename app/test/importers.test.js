@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rowsToMemberRecords, matchMemberRow, planMemberImport, extractAttendanceEntries, matchIdentifier, planAttendanceImport,
-  looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport } from '../js/importers.js';
+  looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, dayNameFor, attendanceTargetForDay } from '../js/importers.js';
 
 // ---- member spreadsheet import ----
 
@@ -144,4 +144,37 @@ test('planHikvisionImport groups multiple people into the same day and sorts day
   ];
   const plan = planHikvisionImport(entries, []);
   assert.deepEqual(plan.days.map((d) => d.date), ['2025-01-02', '2025-01-09']);
+});
+
+// ---- attributing a clock-in day to a service/ministry ----
+
+test('dayNameFor reads the date as UTC regardless of the machine\'s own time zone', () => {
+  // 2026-09-27 is a Sunday, 2026-09-30 a Wednesday (fixed dates, checked against a calendar).
+  assert.equal(dayNameFor('2026-09-27'), 'Sunday');
+  assert.equal(dayNameFor('2026-09-30'), 'Wednesday');
+});
+
+test('attendanceTargetForDay: Sunday always goes to the main service, no ministry needed', () => {
+  assert.deepEqual(attendanceTargetForDay('2026-09-27', []), { ministryId: undefined, service: 'Sunday service' });
+  // Even when a ministry happens to also meet on Sunday, Sunday still wins.
+  const ministries = [{ id: 'yth', name: 'Youth', meetDays: ['Sunday'] }];
+  assert.deepEqual(attendanceTargetForDay('2026-09-27', ministries), { ministryId: undefined, service: 'Sunday service' });
+  // sundayService is configurable.
+  assert.deepEqual(attendanceTargetForDay('2026-09-27', [], { sundayService: 'Main service' }), { ministryId: undefined, service: 'Main service' });
+});
+
+test('attendanceTargetForDay: a weekday with one matching ministry files under that ministry', () => {
+  const ministries = [{ id: 'yth', name: 'Youth', meetDays: ['Wednesday'] }, { id: 'wm', name: 'Women', meetDay: 'Friday' }];
+  assert.deepEqual(attendanceTargetForDay('2026-09-30', ministries), { ministryId: 'yth', service: 'Youth meeting' });
+});
+
+test('attendanceTargetForDay: a weekday with no ministry meeting scheduled is skipped (null)', () => {
+  const ministries = [{ id: 'yth', name: 'Youth', meetDays: ['Friday'] }];
+  assert.equal(attendanceTargetForDay('2026-09-30', ministries), null);
+  assert.equal(attendanceTargetForDay('2026-09-30', []), null);
+});
+
+test('attendanceTargetForDay: two ministries meeting the same day pick one alphabetically by name', () => {
+  const ministries = [{ id: 'yth', name: 'Youth', meetDays: ['Wednesday'] }, { id: 'chr', name: 'Choir', meetDays: ['Wednesday'] }];
+  assert.deepEqual(attendanceTargetForDay('2026-09-30', ministries), { ministryId: 'chr', service: 'Choir meeting' });
 });

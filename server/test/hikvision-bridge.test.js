@@ -9,7 +9,8 @@ import { createApp } from '../src/app.js';
 import { fileStore } from '../src/fileStore.js';
 import { createRepo } from '../../app/js/sync.js';
 import { memoryStore } from '../../app/js/store.js';
-import { pollOnce, serviceFor } from '../hikvision-bridge.js';
+import { dayNameFor } from '../../app/js/importers.js';
+import { pollOnce } from '../hikvision-bridge.js';
 
 // A device fake that always accepts (digest auth itself is covered in hikvision.test.js) —
 // this test is about the bridge's own logic: matching events to members and recording
@@ -35,6 +36,20 @@ test('bridge: matches clock-in events to members and records attendance idempote
   await admin.sync();
   await admin.createStaff({ name: 'Clock-in', email: 'clockin@g.org', password: 'password1', role: 'secretary' });
 
+  // The bridge attributes today's check-ins by today's actual day of week (attendanceTargetForDay
+  // in app/js/importers.js), not a fixed date, so this test has to work out today's day name and
+  // set expectations from it instead of hard-coding "Sunday service" -- otherwise this test would
+  // only pass when it happens to run on a Sunday. On a non-Sunday, a ministry that meets that day
+  // is created so the check-ins have somewhere to go instead of being skipped.
+  const today = new Date().toISOString().slice(0, 10);
+  const todayName = dayNameFor(today);
+  let expectedService = 'Sunday service';
+  if (todayName !== 'Sunday') {
+    await admin.save('ministries', { name: 'Test Ministry', meetDays: [todayName] });
+    await admin.sync();
+    expectedService = 'Test Ministry meeting';
+  }
+
   const device = fakeDevice([
     { time: new Date().toISOString(), employeeNoString: '7' },
     { time: new Date().toISOString(), employeeNoString: '9' },
@@ -52,7 +67,7 @@ test('bridge: matches clock-in events to members and records attendance idempote
   const after1 = await admin.sync().then(() => admin.list('attendance'));
   assert.equal(after1.length, 1);
   assert.deepEqual(after1[0].presentIds.sort(), [ama, kofi].sort());
-  assert.equal(after1[0].service, 'Sunday service');
+  assert.equal(after1[0].service, expectedService);
 
   // Polling again (device still reporting the same two check-ins) must not duplicate the
   // attendance record or the member IDs in it.
@@ -65,17 +80,35 @@ test('bridge: matches clock-in events to members and records attendance idempote
   chServer.close(); device.close();
 });
 
-test('serviceFor: picks the service by day of week, falling back to config.service then "Clock-in"', () => {
-  // 2026-09-27 is a Sunday, 2026-09-30 a Wednesday (UTC) -- fixed dates so this doesn't depend
-  // on whatever day the test happens to run.
-  const config = { servicesByDay: { sunday: 'Sunday service', wednesday: 'Bible study' }, service: 'Midweek service' };
-  assert.equal(serviceFor('2026-09-27', config), 'Sunday service');
-  assert.equal(serviceFor('2026-09-30', config), 'Bible study');
-  // Tuesday isn't in servicesByDay -- falls back to config.service.
-  assert.equal(serviceFor('2026-09-29', config), 'Midweek service');
-  // No servicesByDay at all -- config.service applies to every day.
-  assert.equal(serviceFor('2026-09-27', { service: 'Sunday service' }), 'Sunday service');
-  assert.equal(serviceFor('2026-09-29', { service: 'Sunday service' }), 'Sunday service');
-  // Neither set -- generic default.
-  assert.equal(serviceFor('2026-09-29', {}), 'Clock-in');
+test('bridge: skips recording check-ins on a day with no service or ministry meeting scheduled', async () => {
+  const chServer = createApp(openDb(), { secret: 't' });
+  await new Promise((r) => chServer.listen(0, r));
+  const apiUrl = `http://127.0.0.1:${chServer.address().port}`;
+
+  const admin = createRepo(memoryStore(), { baseUrl: apiUrl });
+  await admin.registerChurch({ churchName: 'Grace', name: 'Pastor', email: 'p2@g.org', password: 'password1' });
+  await admin.save('members', { name: 'Ama Mensah', deviceUserId: '7' });
+  await admin.sync();
+  await admin.createStaff({ name: 'Clock-in', email: 'clockin2@g.org', password: 'password1', role: 'secretary' });
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayName = dayNameFor(today);
+  if (todayName === 'Sunday') return; // Sunday always has somewhere to go -- nothing to test here.
+
+  const device = fakeDevice([{ time: new Date().toISOString(), employeeNoString: '7' }]);
+  await new Promise((r) => device.listen(0, r));
+  const config = { device: { host: `http://127.0.0.1:${device.address().port}`, username: 'x', password: 'x' },
+    churchManager: { apiUrl, email: 'clockin2@g.org', password: 'password1' } };
+
+  const dir = await mkdtemp(join(tmpdir(), 'hikbridge-'));
+  const store = fileStore(join(dir, 'state.json'));
+  const repo = createRepo(store, { baseUrl: apiUrl });
+  await repo.login(config.churchManager.email, config.churchManager.password);
+
+  await pollOnce(config, repo, store);
+  const after = await admin.sync().then(() => admin.list('attendance'));
+  assert.equal(after.length, 0);
+
+  await rm(dir, { recursive: true, force: true });
+  chServer.close(); device.close();
 });

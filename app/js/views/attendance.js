@@ -1,7 +1,7 @@
 import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, barChart, attendanceCount, attendanceChecklist, bulkBar, sum, download, toCsv, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { parseCSV } from '../csv.js';
-import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport } from '../importers.js';
+import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, attendanceTargetForDay } from '../importers.js';
 
 // Exported so ministries.js's own inline attendance panel (take/edit/delete a ministry's own
 // attendance without leaving the ministry) can offer the same service datalist.
@@ -92,21 +92,30 @@ export async function attendanceView({ repo, user, ministries, members, rerender
       const existing = members.find((m) => m.id === id);
       if (existing) await repo.save('members', { ...existing, deviceUserId });
     }
+    let imported = 0, skipped = 0;
     for (const { date, keys } of plan.days) {
+      // Sunday goes to the whole-church service; any other day is attributed to whichever
+      // ministry meets that day (its own meetDays schedule) — a day with no ministry meeting
+      // scheduled at all has nothing to attribute these check-ins to, so it's skipped rather
+      // than filed under some generic "Clock-in device" bucket (see importers.js).
+      const target = attendanceTargetForDay(date, ministries);
+      if (!target) { skipped++; continue; }
+      imported++;
       const presentIds = keys.map((k) => idFor.get(k) ?? k);
-      const existing = recs.find((r) => r.date === date && r.service === 'Clock-in device' && !r.ministryId);
+      const existing = recs.find((r) => r.date === date && r.service === target.service && (r.ministryId ?? undefined) === target.ministryId);
       const merged = new Set([...(existing?.presentIds ?? []), ...presentIds]);
       // A clock-in device can only ever report "was here" — if someone previously marked Late or
       // Excused by hand now shows up in the device log, that's an upgrade to Present, not a
       // second, conflicting status alongside it.
       const lateIds = (existing?.lateIds ?? []).filter((id) => !merged.has(id));
       const excusedIds = (existing?.excusedIds ?? []).filter((id) => !merged.has(id));
-      await repo.save('attendance', { ...existing, date, service: 'Clock-in device', ministryId: undefined, presentIds: [...merged], lateIds, excusedIds, extra: existing?.extra ?? 0 });
+      await repo.save('attendance', { ...existing, date, service: target.service, ministryId: target.ministryId, presentIds: [...merged], lateIds, excusedIds, extra: existing?.extra ?? 0 });
     }
-    let msg = `${plan.days.length} day${plan.days.length === 1 ? '' : 's'} of attendance imported from the device log`;
+    let msg = `${imported} day${imported === 1 ? '' : 's'} of attendance imported from the device log`;
+    if (skipped) msg += `, ${skipped} day${skipped === 1 ? '' : 's'} skipped (no service or ministry meeting scheduled)`;
     if (plan.toCreate.length) msg += `, ${plan.toCreate.length} new member${plan.toCreate.length === 1 ? '' : 's'} added`;
     if (plan.toBackfill.length) msg += `, ${plan.toBackfill.length} linked to a clock-in ID`;
-    toast(msg, 'ok');
+    toast(msg, imported ? 'ok' : 'err');
     rerender();
   };
 
@@ -129,7 +138,7 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     rerender();
   } });
   const uploadCard = h('div', { class: 'card noprint' }, h('b', {}, 'Upload attendance spreadsheet'),
-    h('p', { class: 'hint' }, 'Either a plain "who was present" list for one date — one column of names or clock-in device IDs, with or without a header row — or your clock-in device\'s own exported record log, which is recognized automatically and brings its own dates (one attendance record per day it covers). The device log also registers anyone it recognizes who isn\'t a member yet; existing members are only ever matched, never duplicated.'),
+    h('p', { class: 'hint' }, 'Either a plain "who was present" list for one date — one column of names or clock-in device IDs, with or without a header row — or your clock-in device\'s own exported record log, which is recognized automatically and brings its own dates (one attendance record per day it covers, filed under Sunday\'s main service or whichever ministry meets that day per its own schedule — a day with neither is skipped). The device log also registers anyone it recognizes who isn\'t a member yet; existing members are only ever matched, never duplicated.'),
     h('div', { class: 'row' }, field('Date', importDate, 'Only used for the plain "who was present" list — a device log carries its own dates.'),
       field('Spreadsheet', h('button', { type: 'button', class: 'btn ghost', onclick: () => importFile.click() }, icon('upload', { size: 15 }), 'Upload spreadsheet'))), importFile);
 

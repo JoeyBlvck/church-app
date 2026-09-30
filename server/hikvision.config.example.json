@@ -9,7 +9,6 @@
     "email": "clockin@yourchurch.org",
     "password": "a-password-for-the-clock-in-account"
   },
-  "service": "Midweek service",
   "servicesByDay": {
     "sunday": "Sunday service"
   },
