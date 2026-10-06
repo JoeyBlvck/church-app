@@ -90,7 +90,8 @@ function parseJoined(raw, order) {
   return y && Number(y[1]) <= new Date().getFullYear() ? `${y[1]}-01-01` : null;
 }
 
-const NOTE_LABELS = [['hometown', 'Hometown'], ['marital', 'Marital status'], ['children', 'Children'], ['occupation', 'Occupation'], ['father', 'Father'], ['mother', 'Mother']];
+// Form answers that are real (optional) fields on a member, keyed raw-header-name -> member field.
+const PROFILE_FIELDS = { hometown: 'hometown', marital: 'maritalStatus', children: 'children', occupation: 'occupation', father: 'fatherName', mother: 'motherName' };
 
 // One raw row (keys as in MEMBER_HEADERS' values) -> the tidy row the importer plans from.
 function tidyMemberRow(row, order) {
@@ -116,10 +117,11 @@ function tidyMemberRow(row, order) {
     if (j) out.joined = j; else notes.push(`Joined: ${row.joined}`);
   }
   if (row.ministry && !isBlankish(row.ministry)) out.ministry = row.ministry;
-  const extras = NOTE_LABELS.filter(([k]) => row[k] && !isBlankish(row[k]))
-    .map(([k, label]) => `${label}: ${k === 'marital' ? titleCase(row[k]) : row[k]}`);
-  const allNotes = [...notes, ...extras].join(' · ');
-  if (allNotes) out.notes = allNotes;
+  for (const [k, field] of Object.entries(PROFILE_FIELDS)) {
+    if (!row[k] || isBlankish(row[k])) continue;
+    out[field] = k === 'marital' ? titleCase(row[k]) : k === 'children' ? row[k].replace(/\.0+$/, '') : row[k].replace(/\s+/g, ' ');
+  }
+  if (notes.length) out.notes = notes.join(' · ');
   if (issues.length) out.issues = issues;
   return out;
 }
@@ -195,7 +197,8 @@ export function matchMemberRow(row, members) {
   return null;
 }
 
-const MEMBER_FIELDS = ['name', 'phone', 'email', 'gender', 'birthday', 'status', 'deviceUserId', 'address', 'joined', 'notes'];
+const MEMBER_FIELDS = ['name', 'phone', 'email', 'gender', 'birthday', 'status', 'deviceUserId', 'address', 'joined', 'notes',
+  'hometown', 'maritalStatus', 'children', 'occupation', 'fatherName', 'motherName'];
 
 // Pure: decide what to do with each parsed row. Returns one action per row:
 //  { type: 'skip', row, reason }

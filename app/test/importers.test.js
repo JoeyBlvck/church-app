@@ -61,16 +61,17 @@ const formRow = (o = {}) => { const d = { Timestamp: '2025-02-16 14:08:43', 'FUL
   'MARIATAL STATUS': 'SINGLE', 'NUMBER OF CHILDREN': '0', CONTACT: '0559523538', 'WHERE YOU STAY': 'Babianiha', 'FATHER’S NAME': 'Kwame Mensah', "MOTHER'S NAME": 'Esi Mensah',
   'YEAR YOU JOINED THE CHURCH': '2012', 'E-MAIL': 'Ama@Example.com', OCCUPATION: 'Teacher', ...o }; return FORM_HEADER.map((h) => d[h]); };
 
-test('a Google Form sheet maps onto member fields, with the answers that have no field of their own going to notes', () => {
+test('a Google Form sheet maps onto member fields, into their own member fields (not notes)', () => {
   const [r] = rowsToMemberRecords([FORM_HEADER, formRow()]);
   assert.deepEqual(r, { name: 'Ama Mensah', birthday: '2001-06-13', gender: 'female', phone: '0559523538', address: 'Babianiha', email: 'ama@example.com',
-    joined: '2012-01-01', ministry: 'YOUTH MINISTRY', notes: 'Hometown: Dunkwa · Marital status: Single · Children: 0 · Occupation: Teacher · Father: Kwame Mensah · Mother: Esi Mensah' });
+    joined: '2012-01-01', ministry: 'YOUTH MINISTRY', hometown: 'Dunkwa', maritalStatus: 'Single', children: '0', occupation: 'Teacher',
+    fatherName: 'Kwame Mensah', motherName: 'Esi Mensah' });
 });
 
 test('form answers of "None" are treated as empty rather than stored', () => {
   const [r] = rowsToMemberRecords([FORM_HEADER, formRow({ 'E-MAIL': 'None', OCCUPATION: 'None', 'FATHER’S NAME': 'N/A', CONTACT: 'None' })]);
   assert.equal(r.email, undefined); assert.equal(r.phone, undefined); assert.equal(r.issues, undefined);
-  assert.ok(!/Occupation|Father/.test(r.notes));
+  assert.equal(r.occupation, undefined); assert.equal(r.fatherName, undefined);
 });
 
 test('gender spellings (FEMAL, Female, MALE) all normalize to the two values the app uses', () => {
@@ -277,4 +278,20 @@ test('attendanceTargetForDay: a weekday with no ministry meeting scheduled is sk
 test('attendanceTargetForDay: two ministries meeting the same day pick one alphabetically by name', () => {
   const ministries = [{ id: 'yth', name: 'Youth', meetDays: ['Wednesday'] }, { id: 'chr', name: 'Choir', meetDays: ['Wednesday'] }];
   assert.deepEqual(attendanceTargetForDay('2026-09-30', ministries), { ministryId: 'chr', service: 'Choir meeting' });
+});
+
+test('planMemberImport passes the profile fields (hometown, marital status, children, occupation, parents) through to the member', () => {
+  const [r] = rowsToMemberRecords([FORM_HEADER, formRow()]);
+  const [a] = planMemberImport([r], []);
+  assert.equal(a.type, 'create');
+  assert.deepEqual([a.fields.hometown, a.fields.maritalStatus, a.fields.children, a.fields.occupation, a.fields.fatherName, a.fields.motherName],
+    ['Dunkwa', 'Single', '0', 'Teacher', 'Kwame Mensah', 'Esi Mensah']);
+  assert.equal(a.fields.notes, undefined);
+});
+
+test('emails with capital letters are lowercased and kept; only ones that are not real addresses are reported', () => {
+  const [ok] = rowsToMemberRecords([FORM_HEADER, formRow({ 'E-MAIL': ' CillaOwusu534@Gmail.COM ' })]);
+  assert.equal(ok.email, 'cillaowusu534@gmail.com'); assert.equal(ok.issues, undefined);
+  const [bad] = rowsToMemberRecords([FORM_HEADER, formRow({ 'E-MAIL': 'Paulafugu@icloud' })]);
+  assert.equal(bad.email, undefined); assert.equal(bad.issues[0].field, 'email');
 });

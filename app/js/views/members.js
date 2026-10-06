@@ -9,6 +9,7 @@ import { TYPES as TX_TYPES, METHODS } from './finance.js';
 // the two apart at a glance.
 export const STATUSES = ['member', 'visitor', 'new convert', 'inactive', 'deceased'];
 const GENDERS = ['', 'female', 'male'];
+const MARITAL = ['', 'Single', 'Married', 'Divorced', 'Widowed'];
 // Giving types a member's own profile can quick-record against — excludes 'expense' (not
 // something a member "gives") and 'pledge payment' (that flow needs a pledge picked from
 // finance.js's txForm, which is more machinery than belongs in a quick add-on-the-spot form).
@@ -51,7 +52,9 @@ export function memberForm({ repo, user, ministries, households, member = {}, on
     }
     const id = await repo.save('members', { ...member, name: val(f, 'name'), phone: val(f, 'phone'), email: val(f, 'email'),
       gender: val(f, 'gender'), birthday: val(f, 'birthday'), status: val(f, 'status'), joined: val(f, 'joined') || today(),
-      householdId, notes: val(f, 'notes'), ministryIds, deviceUserId: val(f, 'deviceUserId') || undefined, photo: photo ?? undefined });
+      householdId, notes: val(f, 'notes'), ministryIds,
+      hometown: val(f, 'hometown'), maritalStatus: val(f, 'maritalStatus'), children: val(f, 'children'), occupation: val(f, 'occupation'),
+      fatherName: val(f, 'fatherName'), motherName: val(f, 'motherName'), deviceUserId: val(f, 'deviceUserId') || undefined, photo: photo ?? undefined });
     toast(member.id ? 'Member updated' : 'Member added'); onDone?.(id);
   } },
     photoPicker(photo, (p) => { photo = p; }, { round: true, label: 'Passport picture (optional)' }),
@@ -71,6 +74,12 @@ export function memberForm({ repo, user, ministries, households, member = {}, on
       !isLeader && field('Household / family (optional)', h('select', { name: 'householdId' }, h('option', { value: '' }, '— none —'), opts(households.slice().sort(byName).map((x) => [x.id, x.name]), member.householdId))),
       !isLeader && field('…or new household (optional)', h('input', { name: 'newHousehold', placeholder: 'e.g. Mensah family' })),
       !isLeader && field('Address (optional)', h('input', { name: 'address', value: households.find((x) => x.id === member.householdId)?.address ?? '' })),
+      field('Hometown (optional)', h('input', { name: 'hometown', value: member.hometown ?? '' })),
+      field('Marital status (optional)', h('select', { name: 'maritalStatus' }, opts([...new Set([...MARITAL, member.maritalStatus].filter((g) => g !== undefined))].map((g) => [g, g || '—']), member.maritalStatus ?? ''))),
+      field('Number of children (optional)', h('input', { name: 'children', type: 'number', min: '0', inputmode: 'numeric', value: member.children ?? '' })),
+      field('Occupation (optional)', h('input', { name: 'occupation', value: member.occupation ?? '' })),
+      field("Father's name (optional)", h('input', { name: 'fatherName', value: member.fatherName ?? '' })),
+      field("Mother's name (optional)", h('input', { name: 'motherName', value: member.motherName ?? '' })),
       field('Clock-in device ID (optional)', h('input', { name: 'deviceUserId', value: member.deviceUserId ?? '', placeholder: 'e.g. 1024' }), 'The person/employee number this member is enrolled as on the attendance clock-in device.')),
     // Ministries is the one field whose required-ness depends on who's filling the form out: a
     // leader can only add/edit members within their own ministries, so it's enforced (see the
@@ -191,6 +200,7 @@ export async function membersView(ctx) {
       h('p', {}, avatar(m.name, m.photo, 64)), // cardHead above already covers the photo for print
       h('div', { class: 'kv' },
         [['Phone', m.phone], ['Email', m.email], ['Status', m.status], ['Birthday', m.birthday && fmtDate(m.birthday)], ['Joined', m.joined && fmtDate(m.joined)],
+          ['Hometown', m.hometown], ['Marital status', m.maritalStatus], ['Children', m.children], ['Occupation', m.occupation], ["Father's name", m.fatherName], ["Mother's name", m.motherName],
           ['Household', hName[m.householdId]], ['Clock-in device ID', m.deviceUserId], ['Notes', m.notes]].filter(([, v]) => v).map(([k, v]) => h('div', {}, h('span', { class: 'hint' }, k), h('div', {}, v)))),
       (m.ministryIds ?? []).length > 0 && h('p', {}, (m.ministryIds ?? []).map((id) => h('span', { class: 'pill' }, mName[id] ?? '?'))),
       family.length > 0 && h('p', {}, h('span', { class: 'hint' }, 'Family: '), family.map((x) => x.name).join(', ')),
@@ -308,6 +318,12 @@ export async function membersView(ctx) {
         ['Gender', m.gender],
         ['Birthday', m.birthday && `${fmtDate(m.birthday)} · Age ${ageFromBirthday(m.birthday)}`],
         ['Joined', m.joined && fmtDate(m.joined)],
+        ['Hometown', m.hometown],
+        ['Marital status', m.maritalStatus],
+        ['Children', m.children],
+        ['Occupation', m.occupation],
+        ["Father's name", m.fatherName],
+        ["Mother's name", m.motherName],
         ['Household', hName[m.householdId]],
         ['Clock-in device ID', m.deviceUserId],
         [user.role === 'leader' ? 'Present at your ministry meetings' : 'Times present', attendanceLabel],
@@ -421,13 +437,12 @@ export async function membersView(ctx) {
       if (a.issues) problems.push({ name: a.fields.name, messages: a.issues.map((i) => i.message) });
       if (a.type === 'update') {
         const existing = members.find((m) => m.id === a.id);
-        // Re-importing must never rewrite someone's recorded join date, pile the same notes on
-        // twice, or drop ministries they already belong to.
-        delete fields.joined;
+        // The sheet's own join year is the one to keep (not the day it was uploaded), and
+        // re-importing must never pile the same notes on twice or drop ministries they already belong to.
         if (fields.notes) fields.notes = existing.notes?.includes(fields.notes) ? existing.notes : [existing.notes, fields.notes].filter(Boolean).join('\n');
         if (ministryIds.length) fields.ministryIds = [...new Set([...(existing.ministryIds ?? []), ...ministryIds])];
         await repo.save('members', { ...existing, ...fields, id: a.id }); updated++;
-      } else { await repo.save('members', { status: 'member', joined: today(), ...(ministryIds.length ? { ministryIds } : {}), ...fields }); created++; }
+      } else { await repo.save('members', { status: 'member', ...(ministryIds.length ? { ministryIds } : {}), ...fields }); created++; }
     }
     const skipped = actions.filter((a) => a.type === 'skip');
     const mergedExtra = actions.reduce((n, a) => n + (a.merged ? a.merged - 1 : 0), 0);
