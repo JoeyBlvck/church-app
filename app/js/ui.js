@@ -560,3 +560,32 @@ export function countdownLabel(days) {
   if (days === 1) return 'Tomorrow';
   return `In ${days} days`;
 }
+
+// ---- top progress bar ----
+// A single-page app never makes the browser load a new page, so the browser's own tab spinner
+// and refresh/stop button never move. This is the app's stand-in: a thin bar across the very top
+// that fills while something is in progress (signing in, opening a screen, "Sync now"). Calls
+// nest -- two things running at once keep one bar going until both are done -- and anything that
+// finishes within a split second never shows the bar at all, so quick screens don't flicker.
+export const progress = (() => {
+  let depth = 0, bar = null, shown = false, showT = null, trickleT = null, hideT = null, width = 0;
+  const paint = () => { if (bar) bar.style.width = `${width}%`; };
+  const reveal = () => {
+    if (!bar) { bar = h('div', { class: 'top-progress', role: 'progressbar', 'aria-label': 'Loading' }); document.body.append(bar); }
+    clearTimeout(hideT); shown = true; width = 12; bar.style.transition = 'none'; paint(); void bar.offsetWidth;
+    bar.style.transition = ''; bar.style.opacity = '1';
+    clearInterval(trickleT);
+    trickleT = setInterval(() => { width += (90 - width) * 0.12; paint(); }, 250); // creeps toward 90%, never claims to be finished
+  };
+  return {
+    start() { depth++; if (depth === 1) showT = setTimeout(reveal, 150); },
+    done() {
+      if (depth === 0) return;
+      depth--; if (depth > 0) return;
+      clearTimeout(showT); clearInterval(trickleT);
+      if (!shown) return;
+      shown = false; width = 100; paint();
+      hideT = setTimeout(() => { if (bar) { bar.style.opacity = '0'; } }, 220);
+    },
+  };
+})();

@@ -2,7 +2,7 @@ import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
 import { API_URL, isTauri, APP_VERSION } from './config.js';
 import { checkForUpdate, signOutIfInstalledOutsideUpdater } from './updater.js';
-import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo } from './ui.js';
+import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo, progress } from './ui.js';
 import { icon } from './icons.js';
 
 console.log(`The ChurchFlow build: v${APP_VERSION} (forgot password)`); // sanity check: confirms which build the browser actually loaded
@@ -19,7 +19,8 @@ let tab = localStorage.getItem('tab') || null, online = navigator.onLine, syncin
 // would — without this, leaving a screen you'd scrolled down (e.g. Settings) carries that same
 // scroll position into whatever you open next. A rerender of the SAME tab (saving a form, a
 // background sync, …) must not do this, so it's gated on the tab actually changing.
-function setTab(t) { if (t !== tab) window.scrollTo(0, 0); tab = t; try { if (t) localStorage.setItem('tab', t); else localStorage.removeItem('tab'); } catch {} }
+let navPending = false; // set when the screen is changing, so render() shows the top progress bar for that one
+function setTab(t) { if (t !== tab) { window.scrollTo(0, 0); if (t) navPending = true; } tab = t; try { if (t) localStorage.setItem('tab', t); else localStorage.removeItem('tab'); } catch {} }
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   // clients.claim() (in sw.js) makes a brand-new install fire 'controllerchange' too, on this
@@ -123,6 +124,7 @@ const isEditingPage = () => {
 async function sync({ quiet = true } = {}) {
   if (syncing || !navigator.onLine || !(await repo.user())) return;
   syncing = true; lastError = '';
+  if (!quiet) progress.start(); // only an explicit "Sync now" -- the automatic once-a-minute sync stays invisible
   // Skip re-rendering (but let the sync itself still run and still reach the server) while the
   // person has a form field focused in the page — see isEditingPage() above for why. Only for
   // the *quiet*, automatic path: an explicit "Sync now" click always shows its own result.
@@ -138,6 +140,7 @@ async function sync({ quiet = true } = {}) {
     lastError = e.status === 401 ? '' : 'Server unreachable';
   }
   syncing = false; maybeRender();
+  if (!quiet) progress.done();
 }
 
 // The top-bar search: searches across every named thing the signed-in role can actually open
@@ -295,6 +298,12 @@ function notificationBell(items, go, rerender) {
 }
 
 async function render() {
+  const nav = navPending; navPending = false;
+  if (nav) progress.start();
+  try { return await renderScreen(); } finally { if (nav) progress.done(); }
+}
+
+async function renderScreen() {
   const id = ++renderId;
   const user = await repo.user();
   if (!user) {
@@ -493,6 +502,7 @@ function renderLogin() {
       e.preventDefault();
       const g = (n) => f.elements[n].value.trim();
       const btn = f.querySelector('button'); btn.disabled = true;
+      progress.start();
       // Visible "working" state: the button swaps to a spinner + label for the whole attempt
       // (the network call, then the first sync), and gets its normal label back on failure.
       const idleLabel = btn.textContent;
@@ -527,6 +537,7 @@ function renderLogin() {
           mode = 'login'; prefillEmail = email; draw();
         }
       } catch (ex) { err.textContent = isNetworkError(ex) ? 'Cannot reach the server. The first sign-in needs internet.' : ex.message; restoreBtn(); }
+      finally { progress.done(); }
     } },
       mode === 'register' && [h('label', {}, 'Church name'), h('input', { name: 'church', required: true }), h('label', {}, 'Your name'), h('input', { name: 'name', required: true, autocomplete: 'name' })],
       h('label', {}, 'Email'), emailInput,
@@ -566,47 +577,71 @@ addEventListener('offline', () => { online = false; if (!isEditingPage()) render
 // had to be signed into on their own — leaving it open isn't the same exposure as a browser tab.
 const IDLE_LIMIT_MS = 30 * 60_000; // no mouse/keyboard/touch activity for this long...
 const IDLE_WARNING_MS = 60_000;    // ...shows this countdown before actually signing out
-let idleTimer = null, idleCountdown = null, idleModal = null, lastIdleReset = 0;
+// Everything is measured against the wall clock (Date.now()) rather than counting timer ticks:
+// browsers slow timers down in background tabs and stop them entirely while a laptop sleeps, so a
+// "wait 60 seconds" built from setTimeout/setInterval can take far longer than 60 seconds -- or
+// never finish -- and the person would never actually be signed out. A once-a-second check
+// compares the clock to the last real activity instead, so it signs out on time (or the moment
+// the tab wakes up) whatever the timers did in between.
+let lastActivity = Date.now(), idleModal = null, idleDeadline = 0, idleCountEl = null, idleSigningOut = false;
 
 async function idleSignOut() {
-  clearInterval(idleCountdown); idleCountdown = null;
-  idleModal?.close(); idleModal = null;
-  if (!(await repo.user())) return; // already signed out some other way (e.g. a 401) meanwhile
-  await repo.logout();
-  setTab(null);
-  render();
-  toast('Signed out after 30 minutes of inactivity.');
+  if (idleSigningOut) return;
+  idleSigningOut = true;
+  try {
+    idleModal?.close(); idleModal = null;
+    if (!(await repo.user())) return; // already signed out some other way (e.g. a 401) meanwhile
+    await repo.logout();
+    setTab(null);
+    render();
+    toast('Signed out after 30 minutes of inactivity.');
+  } finally { idleSigningOut = false; lastActivity = Date.now(); }
 }
 
 async function showIdleWarning() {
-  if (!(await repo.user())) return; // nothing to protect — e.g. sitting on the login screen
-  let secondsLeft = Math.round(IDLE_WARNING_MS / 1000);
-  const countEl = h('b', {}, String(secondsLeft));
+  if (!(await repo.user())) { lastActivity = Date.now(); return; } // nothing to protect — e.g. sitting on the login screen
+  if (idleModal) return;
+  idleDeadline = lastActivity + IDLE_LIMIT_MS; // fixed now, so nothing that happens later can stretch it
+  idleCountEl = h('b', {}, String(Math.max(0, Math.ceil((idleDeadline - Date.now()) / 1000))));
   idleModal = modal('Still there?', h('div', {},
-    h('p', {}, 'You’ll be signed out in ', countEl, ' seconds because of inactivity.'),
+    h('p', {}, 'You’ll be signed out in ', idleCountEl, ' seconds because of inactivity.'),
     h('p', { class: 'actions' }, h('button', { class: 'btn block', onclick: () => resetIdleTimer(true) }, 'Stay signed in'))));
-  idleCountdown = setInterval(() => {
-    secondsLeft--;
-    if (secondsLeft <= 0) idleSignOut();
-    else countEl.textContent = String(secondsLeft);
-  }, 1000);
 }
 
-// Runs on every real mouse/keyboard/touch event (throttled below), and on the warning modal's own
-// "Stay signed in" button (force: true, so that one always takes effect at once).
+// Runs once a second for as long as the app is open.
+function idleCheck() {
+  const now = Date.now();
+  if (idleModal) {
+    // Closing the warning with its X / Escape / a click outside counts as "I'm here".
+    if (!idleModal.el.isConnected) return resetIdleTimer(true);
+    const left = Math.ceil((idleDeadline - now) / 1000);
+    if (left <= 0) return idleSignOut();
+    idleCountEl.textContent = String(left);
+    return;
+  }
+  const idleFor = now - lastActivity;
+  if (idleFor >= IDLE_LIMIT_MS) idleSignOut();            // e.g. the computer slept through the whole thing
+  else if (idleFor >= IDLE_LIMIT_MS - IDLE_WARNING_MS) showIdleWarning();
+}
+
+// Real mouse/keyboard/touch activity (throttled) resets the clock -- but only while the warning is
+// NOT showing. Once the countdown is up, only its own "Stay signed in" button (force: true) or
+// closing it counts; otherwise a nudge of the mouse or a page that scrolls itself would quietly
+// cancel the sign-out and the countdown could run out without anything ever happening.
 function resetIdleTimer(force = false) {
   const now = Date.now();
-  if (!force && !idleModal && now - lastIdleReset < 2000) return; // don't churn a timer reset on every single mousemove; react instantly once the warning is up, though
-  lastIdleReset = now;
-  clearTimeout(idleTimer); clearInterval(idleCountdown); idleCountdown = null;
+  if (!force && (idleModal || now - lastActivity < 2000)) return;
+  lastActivity = now;
   if (idleModal) { idleModal.close(); idleModal = null; }
-  idleTimer = setTimeout(showIdleWarning, IDLE_LIMIT_MS - IDLE_WARNING_MS);
 }
 
 if (!isTauri) {
-  ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'].forEach((ev) =>
+  // 'scroll' is left out on purpose: it also fires when the page scrolls itself (a screen
+  // re-rendering, a sync finishing), which is not the person being there.
+  ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
     addEventListener(ev, () => resetIdleTimer(), { passive: true, capture: true }));
-  resetIdleTimer(true);
+  setInterval(idleCheck, 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) idleCheck(); });
 }
 
 // The notification bell (see notificationBell() above), any ui.js menu() dropdown, and phone's

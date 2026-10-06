@@ -804,3 +804,9 @@ ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7
      (it's collected and banked as a lump sum) — hide any offering row even if printing. */
   .giving-offering { display:none; }
 }
+
+/* Top progress bar (progress in ui.js): a thin strip across the very top of the screen. */
+.top-progress { position:fixed; top:0; left:0; height:3px; width:0; z-index:100000; pointer-events:none;
+  background:linear-gradient(90deg, var(--primary), var(--accent)); box-shadow:0 0 8px rgba(12,117,111,.5);
+  opacity:0; transition:width .25s ease-out, opacity .25s ease; }
+@media (prefers-reduced-motion: reduce) { .top-progress { transition:opacity .25s ease; } }
