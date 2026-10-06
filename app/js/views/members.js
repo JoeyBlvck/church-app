@@ -1,7 +1,7 @@
 import { h, field, val, opts, byName, sum, money, today, fmtDate, ageFromBirthday, modal, menu, confirmDialog, toast, download, toCsv, empty, attendanceCount, avatar, photoPicker, bulkBar, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { parseCSV } from '../csv.js';
-import { rowsToMemberRecords, planMemberImport } from '../importers.js';
+import { rowsToMemberRecords, planMemberImport, splitMinistryNames, matchMinistry, prettyMinistryName } from '../importers.js';
 import { TYPES as TX_TYPES, METHODS } from './finance.js';
 
 // 'inactive' covers a member who has simply stopped attending; 'deceased' is kept as its own,
@@ -388,7 +388,24 @@ export async function membersView(ctx) {
     const rows = rowsToMemberRecords(parseCSV(await file.text()));
     const actions = planMemberImport(rows, members);
     const hhByName = new Map(households.map((hh) => [hh.name.toLowerCase(), hh.id]));
+    // A sheet's Department column names ministries as plain text. Each is matched to an existing
+    // ministry first (ignoring case and the word "Ministry"); one that doesn't exist yet is
+    // created -- but only by owner/admin, the roles allowed to write ministries -- otherwise the
+    // member is imported without it and the name is listed in the report below.
+    const canCreateMinistries = ['owner', 'admin'].includes(user.role);
+    const knownMinistries = ministries.slice();
+    const createdMinistries = [], notFoundMinistries = new Set();
+    const ministryIdFor = async (raw) => {
+      const found = matchMinistry(raw, knownMinistries);
+      if (found) return found.id;
+      const name = prettyMinistryName(raw);
+      if (!canCreateMinistries) { notFoundMinistries.add(name); return null; }
+      const id = await repo.save('ministries', { name });
+      knownMinistries.push({ id, name }); createdMinistries.push(name);
+      return id;
+    };
     let created = 0, updated = 0;
+    const problems = []; // { name, messages[] } -- data in the sheet that couldn't be used
     for (const a of actions) {
       if (a.type === 'skip') continue;
       const fields = { ...a.fields };
@@ -398,14 +415,37 @@ export async function membersView(ctx) {
         if (!hid) { hid = await repo.save('households', { name: fields.household }); hhByName.set(key, hid); }
         fields.householdId = hid; delete fields.household;
       }
-      if (a.type === 'update') { const existing = members.find((m) => m.id === a.id); await repo.save('members', { ...existing, ...fields, id: a.id }); updated++; }
-      else { await repo.save('members', { status: 'member', joined: today(), ...fields }); created++; }
+      const ministryIds = [];
+      for (const n of splitMinistryNames(fields.ministry)) { const id = await ministryIdFor(n); if (id) ministryIds.push(id); }
+      delete fields.ministry;
+      if (a.issues) problems.push({ name: a.fields.name, messages: a.issues.map((i) => i.message) });
+      if (a.type === 'update') {
+        const existing = members.find((m) => m.id === a.id);
+        // Re-importing must never rewrite someone's recorded join date, pile the same notes on
+        // twice, or drop ministries they already belong to.
+        delete fields.joined;
+        if (fields.notes) fields.notes = existing.notes?.includes(fields.notes) ? existing.notes : [existing.notes, fields.notes].filter(Boolean).join('\n');
+        if (ministryIds.length) fields.ministryIds = [...new Set([...(existing.ministryIds ?? []), ...ministryIds])];
+        await repo.save('members', { ...existing, ...fields, id: a.id }); updated++;
+      } else { await repo.save('members', { status: 'member', joined: today(), ...(ministryIds.length ? { ministryIds } : {}), ...fields }); created++; }
     }
     const skipped = actions.filter((a) => a.type === 'skip');
+    const mergedExtra = actions.reduce((n, a) => n + (a.merged ? a.merged - 1 : 0), 0);
     let msg = `${created} created, ${updated} updated`;
+    if (mergedExtra) msg += ` — ${mergedExtra} repeat submission${mergedExtra > 1 ? 's' : ''} merged into the same person`;
     if (skipped.length) msg += ` — skipped ${skipped.length} row${skipped.length > 1 ? 's' : ''} with no name`;
     toast(msg, actions.length ? 'ok' : 'err');
     rerender();
+    // Anything worth a second look goes in a report that stays open until dismissed -- a toast
+    // vanishes before 20 names could be read, and these are exactly the ones someone has to fix by hand.
+    if (problems.length || createdMinistries.length || notFoundMinistries.size) {
+      const dlg = modal('Import finished — a few things to check', h('div', {},
+        createdMinistries.length > 0 && h('p', {}, h('b', {}, 'New ministries created: '), createdMinistries.join(', '), '.'),
+        notFoundMinistries.size > 0 && h('p', { class: 'err' }, `These ministries don't exist yet and you can't create them, so those members were imported without them: ${[...notFoundMinistries].join(', ')}.`),
+        problems.length > 0 && h('div', {}, h('p', {}, h('b', {}, `${problems.length} ${problems.length > 1 ? 'people have' : 'person has'} details that couldn't be imported`), ' — they were still added, just without these. Open each one and fill them in:'),
+          h('ul', {}, problems.map((p) => h('li', {}, h('b', {}, p.name), ' — ', p.messages.join('; '))))),
+        h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: () => dlg.close() }, 'Done'))));
+    }
   };
   const fileInput = h('input', { type: 'file', accept: '.csv,text/csv', style: 'display:none',
     onchange: async (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) await importMembers(f); } });

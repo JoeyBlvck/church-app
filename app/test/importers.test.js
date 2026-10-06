@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rowsToMemberRecords, matchMemberRow, planMemberImport, extractAttendanceEntries, matchIdentifier, planAttendanceImport,
-  looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, dayNameFor, attendanceTargetForDay } from '../js/importers.js';
+  looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, dayNameFor, attendanceTargetForDay,
+  parseDateLoose, splitMinistryNames, matchMinistry, prettyMinistryName } from '../js/importers.js';
 
 // ---- member spreadsheet import ----
 
@@ -49,6 +50,105 @@ test('planMemberImport only carries fields the row actually provided, so blanks 
 test('planMemberImport passes a household name through unresolved for the caller to link/create', () => {
   const actions = planMemberImport([{ name: 'Ama', household: 'Mensah family' }], []);
   assert.equal(actions[0].fields.household, 'Mensah family');
+});
+
+// ---- Google Form "contact information" sheet ----
+
+const FORM_HEADER = ['Timestamp', 'FULL NAME', 'DATE OF BIRTH', 'GENDER', 'HOME TOWN', 'DEPARTMENT', 'MARIATAL STATUS', 'NUMBER OF CHILDREN', 'CONTACT',
+  'WHERE YOU STAY', 'FATHER’S NAME', "MOTHER'S NAME", 'YEAR YOU JOINED THE CHURCH', 'E-MAIL', 'OCCUPATION'];
+// A form row, with each answer overridable by column name.
+const formRow = (o = {}) => { const d = { Timestamp: '2025-02-16 14:08:43', 'FULL NAME': 'Ama Mensah ', 'DATE OF BIRTH': '2001-06-13', GENDER: 'FEMALE', 'HOME TOWN': 'Dunkwa', DEPARTMENT: 'YOUTH MINISTRY',
+  'MARIATAL STATUS': 'SINGLE', 'NUMBER OF CHILDREN': '0', CONTACT: '0559523538', 'WHERE YOU STAY': 'Babianiha', 'FATHER’S NAME': 'Kwame Mensah', "MOTHER'S NAME": 'Esi Mensah',
+  'YEAR YOU JOINED THE CHURCH': '2012', 'E-MAIL': 'Ama@Example.com', OCCUPATION: 'Teacher', ...o }; return FORM_HEADER.map((h) => d[h]); };
+
+test('a Google Form sheet maps onto member fields, with the answers that have no field of their own going to notes', () => {
+  const [r] = rowsToMemberRecords([FORM_HEADER, formRow()]);
+  assert.deepEqual(r, { name: 'Ama Mensah', birthday: '2001-06-13', gender: 'female', phone: '0559523538', address: 'Babianiha', email: 'ama@example.com',
+    joined: '2012-01-01', ministry: 'YOUTH MINISTRY', notes: 'Hometown: Dunkwa · Marital status: Single · Children: 0 · Occupation: Teacher · Father: Kwame Mensah · Mother: Esi Mensah' });
+});
+
+test('form answers of "None" are treated as empty rather than stored', () => {
+  const [r] = rowsToMemberRecords([FORM_HEADER, formRow({ 'E-MAIL': 'None', OCCUPATION: 'None', 'FATHER’S NAME': 'N/A', CONTACT: 'None' })]);
+  assert.equal(r.email, undefined); assert.equal(r.phone, undefined); assert.equal(r.issues, undefined);
+  assert.ok(!/Occupation|Father/.test(r.notes));
+});
+
+test('gender spellings (FEMAL, Female, MALE) all normalize to the two values the app uses', () => {
+  const g = (v) => rowsToMemberRecords([FORM_HEADER, formRow({ GENDER: v })])[0].gender;
+  assert.deepEqual(['FEMAL', 'Female', 'FEMALE', 'MALE', 'Male'].map(g), ['female', 'female', 'female', 'male', 'male']);
+});
+
+test('phone numbers: a lost leading 0 is restored, two run-together numbers are split, a number spreadsheet-mangled into scientific notation is reported', () => {
+  const p = (v) => rowsToMemberRecords([FORM_HEADER, formRow({ CONTACT: v })])[0];
+  assert.equal(p('559523538').phone, '0559523538');
+  assert.equal(p('243477381.0').phone, '0243477381');
+  assert.equal(p('024 123 4567').phone, '024 123 4567'); // already fine: left exactly as typed
+  const two = p('05481427130548142714');
+  assert.equal(two.phone, '0548142713'); assert.match(two.notes, /Other number: 0548142714/);
+  const lost = p('2.43477381002437e+18');
+  assert.equal(lost.phone, undefined); assert.equal(lost.issues[0].field, 'phone');
+});
+
+test('an invalid email is dropped and reported, not stored', () => {
+  const [r] = rowsToMemberRecords([FORM_HEADER, formRow({ 'E-MAIL': 'someone@gmail' })]);
+  assert.equal(r.email, undefined); assert.equal(r.issues[0].field, 'email');
+});
+
+test('parseDateLoose reads ISO and day/month/year dates, rejects impossible ones', () => {
+  assert.equal(parseDateLoose('2001-06-13 00:00:00'), '2001-06-13');
+  assert.equal(parseDateLoose('13/06/2001'), '2001-06-13');
+  assert.equal(parseDateLoose('06/13/2001'), '2001-06-13'); // 13 can only be a day, whichever way round it's written
+  assert.equal(parseDateLoose('31/12/22'), '2022-12-31');
+  assert.equal(parseDateLoose('03/04/1990', 'dmy'), '1990-04-03');
+  assert.equal(parseDateLoose('03/04/1990', 'mdy'), '1990-03-04');
+  assert.equal(parseDateLoose('31/02/2000'), null);
+  assert.equal(parseDateLoose('Since birth'), null);
+});
+
+test('whether a birthday column is day-first or month-first is judged from the unambiguous dates in it', () => {
+  const dob = (rows) => rowsToMemberRecords([FORM_HEADER, ...rows.map((v, i) => formRow({ 'FULL NAME': `P${i}`, 'DATE OF BIRTH': v }))]).map((r) => r.birthday);
+  assert.deepEqual(dob(['13/06/2001', '03/04/1990']), ['2001-06-13', '1990-04-03']); // the 13 proves day-first
+  assert.deepEqual(dob(['06/13/2001', '03/04/1990']), ['2001-06-13', '1990-03-04']); // the 13 proves month-first
+});
+
+test('"year joined" answers: a year or month+year becomes 1 January, a full date is kept, free text goes to notes', () => {
+  const j = (v) => rowsToMemberRecords([FORM_HEADER, formRow({ 'YEAR YOU JOINED THE CHURCH': v })])[0];
+  assert.equal(j('2012').joined, '2012-01-01');
+  assert.equal(j('December 2006').joined, '2006-01-01');
+  assert.equal(j('31/12/22').joined, '2022-12-31');
+  const birth = j('Since birth');
+  assert.equal(birth.joined, undefined); assert.match(birth.notes, /Joined: Since birth/);
+});
+
+test('two submissions for the same person merge into one, the later answer winning field by field', () => {
+  const rows = rowsToMemberRecords([FORM_HEADER,
+    formRow({ Timestamp: '2025-03-02 10:00:00', CONTACT: '0541111111', 'E-MAIL': 'None' }), // later submission is listed first
+    formRow({ Timestamp: '2025-02-24 09:00:00', CONTACT: '2.4e+18', 'E-MAIL': 'first@example.com' }),
+    formRow({ 'FULL NAME': 'Ama Mensah', 'DATE OF BIRTH': '1980-01-01', CONTACT: '0542222222' }), // same name, different birthday: someone else
+  ]);
+  assert.equal(rows.length, 2);
+  const ama = rows.find((r) => r.birthday === '2001-06-13');
+  assert.equal(ama.merged, 2);
+  assert.equal(ama.phone, '0541111111');          // the later submission's phone wins
+  assert.equal(ama.email, 'first@example.com');   // the earlier one's email survives, the later left it blank
+  assert.equal(ama.issues, undefined);            // the earlier submission's bad phone was superseded
+  assert.equal(rows.find((r) => r.birthday === '1980-01-01').merged, undefined);
+});
+
+test('ministry names: split on commas, match an existing ministry ignoring case and the word "Ministry", title-case a new one', () => {
+  assert.deepEqual(splitMinistryNames('WOMEN MINISTRY, CHILDREN MINISTRY'), ['WOMEN MINISTRY', 'CHILDREN MINISTRY']);
+  assert.deepEqual(splitMinistryNames('None'), []);
+  const mins = [{ id: 'y', name: 'Youth' }, { id: 'w', name: 'Women Ministry' }];
+  assert.equal(matchMinistry('YOUTH MINISTRY', mins).id, 'y');
+  assert.equal(matchMinistry('women', mins).id, 'w');
+  assert.equal(matchMinistry('MEN MINISTRY', mins), null);
+  assert.equal(prettyMinistryName('MEN MINISTRY'), 'Men Ministry');
+});
+
+test('planMemberImport passes ministry, issues and merged count through for the view to act on', () => {
+  const [a] = planMemberImport(rowsToMemberRecords([FORM_HEADER, formRow({ CONTACT: '2.4e+18' }), formRow({ CONTACT: '2.4e+18', Timestamp: '2025-03-01 00:00:00' })]), []);
+  assert.equal(a.type, 'create'); assert.equal(a.fields.ministry, 'YOUTH MINISTRY');
+  assert.equal(a.merged, 2); assert.equal(a.issues[0].field, 'phone');
 });
 
 // ---- attendance spreadsheet import ----

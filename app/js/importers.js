@@ -13,22 +13,173 @@ const MEMBER_HEADERS = {
   name: 'name', 'full name': 'name',
   'device id': 'deviceUserId', deviceid: 'deviceUserId', 'clock-in device id': 'deviceUserId',
   phone: 'phone', email: 'email', gender: 'gender', status: 'status', birthday: 'birthday', household: 'household',
+  // The layout a Google Form "contact information" sheet comes out in (its question titles,
+  // typos and all -- "MARIATAL STATUS" is how this church's own form spells it), plus the plain
+  // spellings a church's own spreadsheet might use. The ones with no member field of their own
+  // (hometown, marital status, children, occupation, parents) end up in the member's Notes.
+  timestamp: 'submitted',
+  'date of birth': 'birthday', dob: 'birthday',
+  contact: 'phone', 'phone number': 'phone', mobile: 'phone', 'e-mail': 'email',
+  'where you stay': 'address', address: 'address', residence: 'address',
+  department: 'ministry', ministry: 'ministry', ministries: 'ministry',
+  'year you joined the church': 'joined', 'date joined': 'joined', joined: 'joined',
+  'home town': 'hometown', hometown: 'hometown',
+  'mariatal status': 'marital', 'marital status': 'marital',
+  'number of children': 'children', occupation: 'occupation',
+  "father's name": 'father', "mother's name": 'mother',
 };
+
+// ---- cleaning the raw cells of a member row ----
+// "None", "N/A", "-" and friends are how people say "nothing" in a free-text form field.
+const isBlankish = (v) => !v || /^(none|n\/a|na|nil|null|-+)$/i.test(String(v).trim());
+const titleCase = (s) => String(s).trim().toLowerCase().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+
+// Reads "2001-06-13", "13/06/2001", "6/13/2001" or "31/12/22" into "YYYY-MM-DD", or null if it's
+// not a real date. A day or month that can only be one thing settles the order by itself
+// ("13/06" can only be day/month); when both are 12 or under, `order` ('dmy' or 'mdy') decides.
+export function parseDateLoose(value, order = 'dmy') {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+  let y, mo, d, m;
+  if ((m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s].*)?$/))) { [y, mo, d] = m.slice(1).map(Number); }
+  else if ((m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/))) {
+    const a = Number(m[1]), b = Number(m[2]);
+    [d, mo] = a > 12 ? [a, b] : b > 12 ? [b, a] : order === 'mdy' ? [b, a] : [a, b];
+    y = m[3].length === 2 ? (Number(m[3]) < 50 ? 2000 : 1900) + Number(m[3]) : Number(m[3]);
+  } else return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+// Whether a column of day/month/year dates is written day-first or month-first, judged by the
+// dates in it that can only be one or the other (a 25 can't be a month). With no evidence either
+// way it's day-first -- the order this app's own Ghana users write dates in.
+function inferDateOrder(values) {
+  let dmy = 0, mdy = 0;
+  for (const v of values) {
+    const m = String(v ?? '').trim().match(/^(\d{1,2})[/.-](\d{1,2})[/.-]\d{2,4}$/);
+    if (!m) continue;
+    if (Number(m[1]) > 12) dmy++; else if (Number(m[2]) > 12) mdy++;
+  }
+  return mdy > dmy ? 'mdy' : 'dmy';
+}
+
+// Ghana mobile numbers are 10 digits with a leading 0. Spreadsheets damage them in a few
+// recognisable ways, so: a 9-digit number lost its leading 0 (put it back); two numbers typed
+// into one cell run together as 20 digits (keep the first as the phone, the second goes to notes);
+// and one an Excel-style column turned into scientific notation ("2.4E+18") is gone for good --
+// report it rather than store garbage. Anything else is kept exactly as typed.
+function cleanPhone(raw) {
+  if (isBlankish(raw)) return {};
+  const typed = raw.replace(/\.0+$/, '');
+  if (/^\d+(\.\d+)?e[+-]?\d+$/i.test(typed)) return { issue: 'phone number was turned into scientific notation by the spreadsheet and can\'t be recovered -- ask them for it again' };
+  const digits = typed.replace(/\D/g, '');
+  if (digits.length === 9 && !digits.startsWith('0')) return { phone: `0${digits}` };
+  if (/^0\d{9}0\d{9}$/.test(digits)) return { phone: digits.slice(0, 10), other: digits.slice(10) };
+  if (digits.length > 13) return { issue: `phone "${raw}" doesn't look like a phone number` };
+  return { phone: typed };
+}
+
+// Year-only answers ("2012", "December 2006", "Late 2000") become 1 January of that year; a full
+// date is kept as is; anything else ("Since birth") can't be a date, so it goes to notes instead.
+function parseJoined(raw, order) {
+  const full = parseDateLoose(raw, order);
+  if (full) return full;
+  const y = String(raw).match(/\b(19\d{2}|20\d{2})\b/);
+  return y && Number(y[1]) <= new Date().getFullYear() ? `${y[1]}-01-01` : null;
+}
+
+const NOTE_LABELS = [['hometown', 'Hometown'], ['marital', 'Marital status'], ['children', 'Children'], ['occupation', 'Occupation'], ['father', 'Father'], ['mother', 'Mother']];
+
+// One raw row (keys as in MEMBER_HEADERS' values) -> the tidy row the importer plans from.
+function tidyMemberRow(row, order) {
+  const out = {}, issues = [], notes = [];
+  for (const k of ['name', 'deviceUserId', 'status', 'household', 'address']) if (row[k]) out[k] = row[k].replace(/\s+/g, ' ');
+  if (row.gender) { const g = row.gender.toLowerCase(); if (g.startsWith('f')) out.gender = 'female'; else if (g.startsWith('m')) out.gender = 'male'; }
+  if (row.birthday) {
+    const b = parseDateLoose(row.birthday, order);
+    if (b) out.birthday = b; else issues.push({ field: 'birthday', message: `birthday "${row.birthday}" isn't a date I understand` });
+  }
+  if (row.phone) {
+    const p = cleanPhone(row.phone);
+    if (p.phone) out.phone = p.phone;
+    if (p.issue) issues.push({ field: 'phone', message: p.issue });
+    if (p.other) notes.push(`Other number: ${p.other}`);
+  }
+  if (row.email && !isBlankish(row.email)) {
+    const e = row.email.toLowerCase();
+    if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) out.email = e; else issues.push({ field: 'email', message: `email "${row.email}" isn't valid` });
+  }
+  if (row.joined && !isBlankish(row.joined)) {
+    const j = parseJoined(row.joined, order);
+    if (j) out.joined = j; else notes.push(`Joined: ${row.joined}`);
+  }
+  if (row.ministry && !isBlankish(row.ministry)) out.ministry = row.ministry;
+  const extras = NOTE_LABELS.filter(([k]) => row[k] && !isBlankish(row[k]))
+    .map(([k, label]) => `${label}: ${k === 'marital' ? titleCase(row[k]) : row[k]}`);
+  const allNotes = [...notes, ...extras].join(' · ');
+  if (allNotes) out.notes = allNotes;
+  if (issues.length) out.issues = issues;
+  return out;
+}
+
+// Two form submissions for the same person (same name and birthday) become one record: later
+// submissions overwrite earlier ones field by field, so the most recent answer wins but anything
+// only the earlier one filled in is kept. `merged` counts how many submissions were folded in.
+function mergeDuplicateRows(rows) {
+  const byKey = new Map(), order = [];
+  for (const r of rows) {
+    if (!r.name) { order.push(r); continue; }
+    const key = `${r.name.toLowerCase()}|${r.birthday ?? ''}`;
+    const prev = byKey.get(key);
+    if (!prev) { byKey.set(key, { ...r, merged: 1 }); order.push(byKey.get(key)); continue; }
+    const issues = [...(prev.issues ?? []), ...(r.issues ?? [])];
+    Object.assign(prev, r, { merged: prev.merged + 1 });
+    prev.issues = issues;
+  }
+  for (const r of order) {
+    // A problem only stands if no submission supplied a usable value for that field.
+    if (r.issues) { r.issues = r.issues.filter((i) => r[i.field] === undefined); if (!r.issues.length) delete r.issues; }
+    if (r.merged === 1) delete r.merged;
+  }
+  return order;
+}
 
 // Turn a raw parseCSV() result (first row = header) into plain objects with only the
 // columns this app understands, trimmed, with blank cells dropped (so a blank cell never
 // overwrites existing data downstream — the caller only sees the keys a row actually filled in).
+// Beyond trimming, values are tidied for this app: gender to male/female, dates to YYYY-MM-DD,
+// phone numbers repaired where they can be, "None" treated as empty -- and anything that
+// couldn't be used comes back in the row's `issues` so the person can fix it by hand. Form
+// responses submitted twice for the same person are merged (see mergeDuplicateRows).
 export function rowsToMemberRecords(csvRows) {
   if (!csvRows.length) return [];
-  const keys = csvRows[0].map((h) => MEMBER_HEADERS[normalizeHeader(h)] ?? null);
-  return csvRows.slice(1)
+  const keys = csvRows[0].map((h) => MEMBER_HEADERS[normalizeHeader(h).replace(/[‘’]/g, "'")] ?? null);
+  const raw = csvRows.slice(1)
     .filter((r) => r.some((c) => String(c ?? '').trim()))
     .map((r) => {
       const obj = {};
       keys.forEach((key, i) => { if (!key) return; const v = String(r[i] ?? '').trim(); if (v) obj[key] = v; });
       return obj;
     });
+  // A form sheet's own Timestamp column says which of two submissions is the later one.
+  if (raw.every((r) => !r.submitted || !Number.isNaN(Date.parse(r.submitted)))) {
+    raw.sort((a, b) => (a.submitted && b.submitted ? Date.parse(a.submitted) - Date.parse(b.submitted) : 0));
+  }
+  const order = inferDateOrder(raw.flatMap((r) => [r.birthday, r.joined]));
+  return mergeDuplicateRows(raw.map((r) => tidyMemberRow(r, order)));
 }
+
+// ---- ministries named in a sheet's Department column ----
+// "WOMEN MINISTRY, CHILDREN MINISTRY" is two ministries. Names are compared ignoring case and the
+// word "Ministry" itself, so a sheet's "YOUTH MINISTRY" finds a ministry the church already
+// called just "Youth".
+export const splitMinistryNames = (raw) => String(raw ?? '').split(/[,;]/).map((s) => s.trim()).filter((s) => s && !isBlankish(s));
+const ministryKey = (name) => String(name ?? '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ')
+  .replace(/\b(ministry|ministries|department|dept)\b/g, ' ').replace(/\s+/g, ' ').trim();
+export const matchMinistry = (name, ministries) => { const k = ministryKey(name); return k ? ministries.find((m) => ministryKey(m.name) === k) ?? null : null; };
+export const prettyMinistryName = titleCase;
 
 // Match a parsed row to an existing member: by device ID first (if the row has one and it
 // matches a member's stored device ID), otherwise by exact case-insensitive name.
@@ -44,7 +195,7 @@ export function matchMemberRow(row, members) {
   return null;
 }
 
-const MEMBER_FIELDS = ['name', 'phone', 'email', 'gender', 'birthday', 'status', 'deviceUserId'];
+const MEMBER_FIELDS = ['name', 'phone', 'email', 'gender', 'birthday', 'status', 'deviceUserId', 'address', 'joined', 'notes'];
 
 // Pure: decide what to do with each parsed row. Returns one action per row:
 //  { type: 'skip', row, reason }
@@ -60,8 +211,15 @@ export function planMemberImport(rows, members) {
     const fields = {};
     for (const k of MEMBER_FIELDS) if (row[k]) fields[k] = row[k];
     if (row.household) fields.household = row.household;
+    // Ministry names (still raw text) are resolved to ids by the view, like household names.
+    if (row.ministry) fields.ministry = row.ministry;
     const existing = matchMemberRow(row, members);
-    return existing ? { type: 'update', id: existing.id, fields } : { type: 'create', fields };
+    const action = existing ? { type: 'update', id: existing.id, fields } : { type: 'create', fields };
+    // What went wrong with this row's data, and whether it stands for several form submissions,
+    // so the view can report both -- only present when there's something to report.
+    if (row.issues) action.issues = row.issues;
+    if (row.merged) action.merged = row.merged;
+    return action;
   });
 }
 
