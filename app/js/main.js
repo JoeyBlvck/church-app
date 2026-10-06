@@ -347,7 +347,10 @@ async function render() {
   topBar.push(h('div', { class: 'account click', role: 'button', tabindex: 0, title: 'View your profile',
       onclick: goToProfile, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToProfile(); } } },
     avatar(user.name, user.photo, 34), h('div', { class: 'who' }, h('b', {}, user.name), h('small', {}, user.role))));
-  topBar.push(h('button', { class: 'btn ghost sm', onclick: () => sync({ quiet: false }) }, icon('sync', { size: 16 }), 'Sync now'));
+  // While a sync is running the button shows a spinner and is disabled (it also can't stack a
+  // second sync -- sync() itself bails if one is already in progress).
+  topBar.push(h('button', { class: `btn ghost sm${syncing ? ' busy' : ''}`, disabled: syncing, onclick: () => sync({ quiet: false }) },
+    syncing ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : icon('sync', { size: 16 }), syncing ? 'Syncing…' : 'Sync now'));
   // one uppercase "nav-title" header per group, only where the group actually changes —
   // this keeps role-specific tab lists (which may skip a group entirely) from showing an
   // empty or duplicate section header.
@@ -490,6 +493,12 @@ function renderLogin() {
       e.preventDefault();
       const g = (n) => f.elements[n].value.trim();
       const btn = f.querySelector('button'); btn.disabled = true;
+      // Visible "working" state: the button swaps to a spinner + label for the whole attempt
+      // (the network call, then the first sync), and gets its normal label back on failure.
+      const idleLabel = btn.textContent;
+      btn.classList.add('busy');
+      btn.replaceChildren(h('span', { class: 'spinner', 'aria-hidden': 'true' }), mode === 'login' ? ' Signing in…' : ' Creating account…');
+      const restoreBtn = () => { btn.disabled = false; btn.classList.remove('busy'); btn.replaceChildren(idleLabel); };
       try {
         if (mode === 'login') {
           const email = g('email'), password = f.elements.password.value;
@@ -517,7 +526,7 @@ function renderLogin() {
           toast('Church created — sign in to get started.');
           mode = 'login'; prefillEmail = email; draw();
         }
-      } catch (ex) { err.textContent = isNetworkError(ex) ? 'Cannot reach the server. The first sign-in needs internet.' : ex.message; btn.disabled = false; }
+      } catch (ex) { err.textContent = isNetworkError(ex) ? 'Cannot reach the server. The first sign-in needs internet.' : ex.message; restoreBtn(); }
     } },
       mode === 'register' && [h('label', {}, 'Church name'), h('input', { name: 'church', required: true }), h('label', {}, 'Your name'), h('input', { name: 'name', required: true, autocomplete: 'name' })],
       h('label', {}, 'Email'), emailInput,

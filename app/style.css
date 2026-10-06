@@ -373,6 +373,13 @@ td.sel-col input[type=checkbox], th.sel-col input[type=checkbox] { display:block
 .btn.del:hover { background:var(--bad-bg); }
 .btn.sm { padding:7px 12px; font-size:13px; }
 .btn:disabled { opacity:.55; cursor:default; transform:none; }
+/* Loading feedback: a small ring that spins inside a button while its action is in flight
+   (signing in, registering, syncing). A busy button stays fully opaque -- unlike a plain
+   disabled one -- so the spinner and its "…ing" label are actually readable. */
+@keyframes spin { to { transform:rotate(360deg); } }
+.spinner { display:inline-block; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:spin .7s linear infinite; flex:none; }
+.btn.busy:disabled { opacity:1; cursor:progress; }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration:2s; } }
 .icon-btn { background:var(--pill); border:0; border-radius:8px; width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:var(--mute); cursor:pointer; transition:background .12s, color .12s; }
 .icon-btn:hover { background:var(--bad-bg); color:var(--bad); }
 
