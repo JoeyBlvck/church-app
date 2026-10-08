@@ -1,6 +1,6 @@
 import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
-import { API_URL, isTauri, APP_VERSION } from './config.js';
+import { API_URL, isTauri, isLocalEdition, APP_VERSION } from './config.js';
 import { checkForUpdate, signOutIfInstalledOutsideUpdater } from './updater.js';
 import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo, progress } from './ui.js';
 import { icon } from './icons.js';
@@ -667,4 +667,6 @@ setInterval(() => { checkForUpdate(); }, 4 * 60 * 60_000);
 // signed-in session left over from whatever it had before, that session is cleared first -- see
 // updater.js's own note on why. render() itself is what shows the sign-in screen once there's no
 // session for it to find.
-signOutIfInstalledOutsideUpdater(repo).then(() => render().then(() => { sync(); checkForUpdate(); }));
+(isLocalEdition ? (progress.start(), repo.waitUntilUp().finally(() => progress.done())) : Promise.resolve())
+  .then(() => signOutIfInstalledOutsideUpdater(repo))
+  .then(() => render().then(() => { sync(); checkForUpdate(); }));

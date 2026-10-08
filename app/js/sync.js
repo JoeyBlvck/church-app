@@ -140,6 +140,15 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
     runBackup: () => http('POST', '/backup/run', {}),
     setBackupDrive: (extraDir) => http('POST', '/backup/settings', { extraDir: extraDir || null }),
     restoreBackup: (path) => http('POST', '/backup/restore', { path }),
+    // Offline edition: the desktop app opens its window while the bundled server is still starting.
+    async waitUntilUp(timeoutMs = 45_000) {
+      const until = Date.now() + timeoutMs;
+      while (Date.now() < until) {
+        try { const r = await fetchImpl(baseUrl + '/health'); if (r.ok) return true; } catch { /* still starting */ }
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      return false;
+    },
     // True once the server answers again after it restarted for a restore.
     async waitForServer(timeoutMs = 30_000) {
       const until = Date.now() + timeoutMs;
