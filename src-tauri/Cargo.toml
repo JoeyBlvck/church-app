@@ -16,6 +16,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Desktop auto-update: checks the GitHub release's own latest.json manifest for a newer signed
+# build (app/js/updater.js does the checking/prompting from the JS side) and, once the person
+# says yes, downloads, verifies its signature, installs it, and relaunches.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [profile.release]
 panic = "abort"

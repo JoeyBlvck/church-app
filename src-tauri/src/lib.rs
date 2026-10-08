@@ -82,6 +82,13 @@ fn start_local_server(app: &tauri::AppHandle) -> Option<Child> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        // See app/js/updater.js: it drives both of these from the frontend via
+        // window.__TAURI__.updater / .process (app.withGlobalTauri, set in tauri.conf.json, is what
+        // exposes that global). The offline edition turns the update check off -- see
+        // tauri.offline.conf.json and updater.js -- since the church PC has no internet and its
+        // installer is not the cloud app's.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // If something is already answering on our port (a second window of the app, say), use it
             // as it is rather than fighting over the port.

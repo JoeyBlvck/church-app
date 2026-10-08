@@ -19,6 +19,8 @@ const LAST_SEEN_VERSION_KEY = 'churchflowLastSeenVersion';
 const RELAUNCHED_BY_UPDATER_KEY = 'churchflowRelaunchedByUpdater';
 
 export async function checkForUpdate() {
+  // The offline (one PC) edition never updates itself: its installer is not the cloud app's.
+  if (window.__CHURCHFLOW_LOCAL_API__) return;
   const updater = window.__TAURI__?.updater;
   if (!updater || checking) return;
   checking = true;

@@ -3,7 +3,20 @@
   "productName": "The ChurchFlow Offline",
   "identifier": "com.joeystudios.churchflow.offline",
   "bundle": {
-    "targets": ["nsis"],
-    "resources": { "local-server/": "local-server/" }
+    "targets": [
+      "nsis"
+    ],
+    "resources": {
+      "local-server/": "local-server/"
+    },
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4ODFDMDExMEU4MTM4QkMKUldTOE9JRU9FY0NCR0daWEVhMHl0UXNNc0s5Y2VLTi9jNFYyNEtOYWtoSFo4Y3VDSFErekNNVVoK",
+      "endpoints": [
+        "http://127.0.0.1:9/offline-edition-has-no-updates"
+      ]
+    }
   }
 }
