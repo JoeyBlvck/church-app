@@ -43,3 +43,6 @@ dist/
 # (see src-tauri/UPDATER_SIGNING_SECRETS.txt for what to do with it)
 src-tauri/updater-signing-key.pem*
 src-tauri/UPDATER_SIGNING_SECRETS.txt
+
+# Offline edition: assembled by scripts/prepare-offline.mjs before building the installer
+src-tauri/local-server/

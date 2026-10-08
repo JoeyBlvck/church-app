@@ -135,6 +135,21 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
     // (app/checkin.html, built client-side from the signed-in user's own tenantId — see
     // settings.js). The only server-side setting is what to call the attendance record it creates.
     getCheckinConfig: () => http('GET', '/checkin/config'),
+    // Offline edition only (the hosted server answers 404 to all of these -- see server/src/backup.js).
+    backupStatus: () => http('GET', '/backup/status'),
+    runBackup: () => http('POST', '/backup/run', {}),
+    setBackupDrive: (extraDir) => http('POST', '/backup/settings', { extraDir: extraDir || null }),
+    restoreBackup: (path) => http('POST', '/backup/restore', { path }),
+    // True once the server answers again after it restarted for a restore.
+    async waitForServer(timeoutMs = 30_000) {
+      const until = Date.now() + timeoutMs;
+      await new Promise((r) => setTimeout(r, 1500)); // let it actually go down first
+      while (Date.now() < until) {
+        try { const r = await fetchImpl(baseUrl + '/health'); if (r.ok) return true; } catch { /* still restarting */ }
+        await new Promise((r) => setTimeout(r, 700));
+      }
+      return false;
+    },
     saveCheckinConfig: (serviceName) => http('POST', '/checkin/config', { serviceName }),
     // A bare {id, name}[] of every member in the church — for a ministry leader picking someone
     // to add to their ministry's roster (ministries.js), since their normal local-first sync only

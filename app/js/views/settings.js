@@ -3,7 +3,7 @@ import { icon } from '../icons.js';
 import { toCSV } from '../csv.js';
 import { renderQrToCanvas, qrToSvgString } from '../vendor/qrcode.js';
 import { getTheme, setTheme } from '../theme.js';
-import { APP_VERSION } from '../config.js';
+import { APP_VERSION, isLocalEdition } from '../config.js';
 
 // The 16 regions of Ghana (2019 boundaries) — a convenience picker, since this app is built
 // for Ghanaian churches; District and Location stay free text since there are far too many
@@ -16,11 +16,13 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
   // A secretary can't rename the check-in service, but — same as sending a Notice by SMS/WhatsApp —
   // is exactly who'd be asked to pull up and display the QR code at the door, so they can view it.
   const canViewCheckin = canManageChurch || user.role === 'secretary';
-  const [last, church, pending, settingsList, smsConfig, paystackConfig, whatsappConfig, checkinConfig] = await Promise.all([repo.lastSync(), repo.churchName(), repo.pending(), repo.list('settings'),
+  const [last, church, pending, settingsList, smsConfig, paystackConfig, whatsappConfig, checkinConfig, backupInfo] = await Promise.all([repo.lastSync(), repo.churchName(), repo.pending(), repo.list('settings'),
     canManageChurch ? repo.getSmsConfig().catch(() => ({ configured: false, senderId: null })) : Promise.resolve(null),
     canManageChurch ? repo.getPaystackConfig().catch(() => ({ configured: false, publicKey: null, testMode: null })) : Promise.resolve(null),
     canManageChurch ? repo.getWhatsappConfig().catch(() => ({ configured: false })) : Promise.resolve(null),
-    canViewCheckin ? repo.getCheckinConfig().catch(() => ({ serviceName: '' })) : Promise.resolve(null)]);
+    canViewCheckin ? repo.getCheckinConfig().catch(() => ({ serviceName: '' })) : Promise.resolve(null),
+    // Only the offline (one PC) edition has backups; anywhere else this is a 404 and the card never shows.
+    canManageChurch ? repo.backupStatus().catch(() => null) : Promise.resolve(null)]);
   const cs = settingsList.find((s) => s.id === 'church') ?? {};
 
   let myPhoto = user.photo ?? null;
@@ -177,12 +179,69 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
   // "Advanced" field and elsewhere in the app), and two direct contact buttons. Placed right
   // before the Danger zone so it's the last "normal" card on the page, not mixed in among the
   // admin-only integration cards above it.
-  const helpFaqs = [
+  const helpFaqs = (isLocalEdition ? [
+    ["Does it work without an internet connection?", "Yes \u2014 this copy of The ChurchFlow keeps everything on this computer and never needs the internet for records, attendance, finance or reports. Only optional extras that send things out (text messages, online giving) need a connection."],
+    ["Where are our records kept?", "Only on this computer. That is why Settings \u2192 Backups makes a dated copy every day, and why a second copy on a USB drive is worth setting up."],
+    ["Is my church's data safe?", "Only people with a staff login can open it, and nothing is sent anywhere. Giving and finance records are append-only, so a posted entry can never be silently edited or deleted \u2014 corrections are made with new entries. Keep your backups up to date."],
+    ["How do I get help or report a problem?", "Use the buttons below to email or WhatsApp us directly, any time."],
+  ] : [
     ["Does it work without an internet connection?", "Yes \u2014 every screen works fully offline on each device. Anything you enter is saved immediately on that device and syncs automatically the next time it's back online."],
     ["Is my church's data safe?", "Each church's data is kept completely separate, and only your own staff accounts can sign in to it. Giving and finance records are append-only, so a posted entry can never be silently edited or deleted \u2014 corrections are always recorded as new, linked entries."],
     ["How do updates work?", "The desktop app checks for updates automatically while it's open and connected to the internet, and lets you install them with one click."],
     ["How do I get help or report a problem?", "Use the buttons below to email or WhatsApp us directly, any time."],
-  ];
+  ]);
+  // ---- Backups (offline edition): dated copies of everything on this computer, a daily one made
+  // automatically, an optional second copy on a USB / external drive, and a way to put one back.
+  // The records live only on this PC, so these copies are the church's only safety net.
+  const backupCard = backupInfo && backupCardFor(backupInfo);
+  function backupCardFor(info) {
+    const when = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+    const size = (b) => (b >= 1_048_576 ? `${(b / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
+    const lastOk = info.files[0];
+    const problems = (info.last?.results ?? []).filter((r) => !r.ok);
+    const stale = !lastOk || Date.now() - lastOk.modified > 3 * 86_400_000;
+    const driveInput = h('input', { name: 'extraDir', value: info.extraDir ?? '', placeholder: 'e.g. E:\\ChurchFlow Backups', list: 'backup-drives', autocomplete: 'off', style: 'min-width:260px' });
+    const driveList = h('datalist', { id: 'backup-drives' }, info.drives.map((d) => h('option', { value: `${d}ChurchFlow Backups` })));
+    const run = async (btn) => {
+      btn.disabled = true; const label = btn.textContent; btn.textContent = 'Backing up…';
+      try {
+        const r = await repo.runBackup();
+        const bad = r.results.filter((x) => !x.ok);
+        if (bad.length) toast(bad.map((x) => x.error).join(' '), 'err'); else toast(`Backed up to ${r.results.length === 2 ? 'this computer and the USB drive' : 'this computer'}.`);
+        rerender();
+      } catch (e) { toast(e.message, 'err'); btn.disabled = false; btn.textContent = label; }
+    };
+    const restore = async (f) => {
+      const ok = await confirmDialog(`Put the church's records back to how they were on ${when(f.modified)}? Everything entered since then will be replaced. A copy of today's records is saved first, so this can be undone.`, 'Restore this backup');
+      if (!ok) return;
+      toast('Restoring… please wait a moment.');
+      try {
+        await repo.restoreBackup(f.path);
+        if (!(await repo.waitForServer())) return toast('The restore is taking long. Close and reopen The ChurchFlow to finish.', 'err');
+        await repo.resync(); toast('Restored. Your records are back as of that backup.'); rerender();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    return h('div', { class: 'card' }, h('b', {}, 'Backups — protect your records'),
+      h('p', { class: 'hint' }, 'All of your church\'s records are kept on this computer only. A backup is a dated copy of everything. One is made automatically every day while the app is open — keep a second copy on a USB drive so a broken computer never means lost records.'),
+      h('p', {}, lastOk ? `Last backup: ${when(lastOk.modified)}` : 'No backup yet.'),
+      (stale || problems.length > 0) && h('p', { class: 'err', role: 'alert' }, problems.length
+        ? problems.map((p) => p.error).join(' ')
+        : lastOk ? 'The last backup is more than 3 days old. Press “Back up now”.' : 'Press “Back up now” to make the first one.'),
+      h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: (e) => run(e.currentTarget) }, icon('download', { size: 15 }), 'Back up now')),
+      h('p', { class: 'hint' }, `Copies on this computer are kept in: ${info.defaultDir}`),
+      h('form', { onsubmit: async (e) => { e.preventDefault();
+        try { await repo.setBackupDrive(driveInput.value.trim()); toast(driveInput.value.trim() ? 'USB drive copy turned on.' : 'USB drive copy turned off.'); rerender(); } catch (ex) { toast(ex.message, 'err'); } } },
+        field('Second copy on a USB / external drive (optional)', h('div', { class: 'row' }, driveInput, driveList,
+          h('button', { class: 'btn ghost' }, info.extraDir ? 'Save' : 'Turn on')),
+          info.drives.length ? `Drives found: ${info.drives.join('  ')}` : 'Plug in the USB drive, then type its folder, e.g. E:\\ChurchFlow Backups.')),
+      info.files.length > 0 && h('div', {}, h('b', {}, 'Saved backups'),
+        info.files.slice(0, 10).map((f) => h('div', { class: 'feed' },
+          h('span', { class: 'hint' }, `${when(f.modified)} · ${f.kind === 'drive' ? 'USB drive' : 'This computer'} · ${size(f.size)}`),
+          ' ', h('button', { class: 'btn ghost sm', onclick: () => restore(f) }, 'Restore')),
+        ),
+        info.files.length > 10 && h('p', { class: 'hint' }, `+ ${info.files.length - 10} older`)));
+  }
+
   const helpCard = h('div', { class: 'card' }, h('b', {}, 'Help & Support'),
     h('p', { class: 'hint' }, `The ChurchFlow v${APP_VERSION} \u00b7 by Joey Studios`),
     ...helpFaqs.map(([q, a]) => h('details', {}, h('summary', {}, q), h('p', { class: 'hint' }, a))),
@@ -239,6 +298,7 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     canManageChurch && go && h('div', { class: 'card' }, h('b', {}, 'Staff & leaders'),
       h('p', { class: 'hint' }, 'Create logins for other office staff and ministry leaders, change roles, reset passwords, or deactivate an account.'),
       h('p', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => go('staff') }, icon('staff', { size: 15 }), 'Manage staff & leaders'))),
+    backupCard,
     h('div', { class: 'card' }, h('b', {}, 'Sync & backup'), h('p', { class: 'hint' }, `Last synced: ${last ? new Date(last).toLocaleString() : 'never'} · ${pending} change${pending === 1 ? '' : 's'} waiting`),
       h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: async () => { await sync(); toast('Sync finished'); } }, 'Sync now'),
         h('button', { class: 'btn ghost', onclick: async () => download(`church-backup-${today()}.json`, await repo.backup(), 'application/json') }, icon('download', { size: 15 }), 'Download backup (JSON)'),

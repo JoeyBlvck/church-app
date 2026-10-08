@@ -1,7 +1,7 @@
 {
   "name": "church-flow-desktop-shell",
   "private": true,
-  "version": "0.17.0",
+  "version": "0.19.0",
   "description": "Build tooling for The ChurchFlow's desktop app (Mac/Windows) — wraps app/ in a native window via Tauri. Not used for the hosted server or the browser app themselves.",
   "scripts": {
     "tauri": "tauri"

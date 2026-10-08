@@ -1,0 +1,50 @@
+name: Build offline Windows installer (one PC, no internet)
+
+# Builds "The ChurchFlow Offline" -- a Windows installer that carries its own copy of Node and the
+# sync server, so a church PC can run everything with no internet and no cloud account: set up the
+# church, members, attendance, finance and reports all stay on that one computer, with automatic
+# daily backups (see README, "Offline edition").
+#
+# Manual only: Actions tab -> "Build offline Windows installer" -> Run workflow. The installer
+# (.exe) is attached to the run under "Artifacts". Unsigned, so Windows SmartScreen will say
+# "Windows protected your PC" the first time: More info -> Run anyway.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run the server's own tests first
+        working-directory: server
+        run: npm test
+
+      - name: Install the Tauri CLI
+        run: npm install
+
+      - name: Assemble the bundled server (Node for Windows + server code)
+        run: node scripts/prepare-offline.mjs --download-windows-node
+
+      - name: Build the installer (unsigned)
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          uploadWorkflowArtifacts: true
+          args: --config src-tauri/tauri.offline.conf.json --verbose

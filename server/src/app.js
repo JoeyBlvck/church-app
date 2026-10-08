@@ -6,6 +6,7 @@ import { normalizeGhanaPhone, sendSms, SmsConfigError } from './sms.js';
 import { initializeTransaction, verifyTransaction, verifySignature, PaystackConfigError } from './paystack.js';
 import { sendTemplateMessage, sendTextMessage, verifyWebhookChallenge, parseInboundMessage, WhatsAppConfigError } from './whatsapp.js';
 import { sendPasswordResetEmail, sendWelcomeEmail } from './email.js';
+import { RESTART_EXIT_CODE, BackupError } from './backup.js';
 
 const SENDER_ID_RE = /^[A-Za-z0-9 ]{3,11}$/;
 const GIVING_PURPOSES = ['tithe', 'offering', 'welfare', 'donation'];
@@ -36,7 +37,10 @@ const RATE_LIMITED_ROUTES = new Map([
   ['POST /auth/reset-password', { windowMs: 60_000, max: 10 }],
 ]);
 
-export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', sendPasswordResetEmailImpl, sendWelcomeEmailImpl } = {}) {
+export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', sendPasswordResetEmailImpl, sendWelcomeEmailImpl,
+  // Offline ("one PC") edition only -- see backup.js and local.js. Both are left unset on the hosted
+  // server, where /backup/* simply doesn't exist and any number of churches may register.
+  backup = null, localEdition = false, onRestartRequested = () => process.exit(RESTART_EXIT_CODE) } = {}) {
   // In-memory and per-app-instance on purpose: this runs as a single Node process (see
   // server/src/index.js), so there's no shared store to coordinate with — if this is ever scaled
   // to more than one instance, this needs to move to something shared (e.g. Redis) instead, or a
@@ -248,6 +252,10 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       if (!churchName || !name || !email || !password || password.length < 8)
         throw new HttpError(400, 'churchName, name, email and 8+ char password required');
       if (q.tenantByEmail.get(email.toLowerCase())) throw new HttpError(409, 'email in use');
+      // One computer, one church: after the first is set up, a second sign-up here would only ever
+      // be a mistake (a second church's records would sit mixed into this one's backups).
+      if (localEdition && db.prepare('SELECT 1 FROM tenants LIMIT 1').get())
+        throw new HttpError(403, 'A church is already set up on this computer. Sign in instead.');
       const tid = randomUUID(), uid = randomUUID();
       q.insTenant.run(tid, churchName, Date.now());
       q.insUser.run(uid, tid, email.toLowerCase(), name, hashPassword(password), 'owner', '[]');
@@ -1022,8 +1030,37 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
 
     'GET /me': (req) => { const u = auth(req); return { user: u, church: q.tenantById.get(u.tenantId)?.name }; },
 
-    'GET /health': () => ({ ok: true }),
+    'GET /health': () => ({ ok: true, localEdition }),
+
+    // ---- backups (offline edition only; see backup.js) ----
+    // Only the owner/admin may see or change these: a backup holds every member's details and the
+    // whole giving ledger.
+    'GET /backup/status': (req) => { backupAuth(req); return backup.status(); },
+    'POST /backup/run': (req) => {
+      backupAuth(req);
+      const results = backup.run({ reason: 'manual' });
+      return { results, ...backup.status() };
+    },
+    'POST /backup/settings': (req, body) => {
+      backupAuth(req);
+      backup.setExtraDir(body.extraDir || null);
+      return backup.status();
+    },
+    // Stages the chosen backup; the launcher swaps it in on the restart this triggers.
+    'POST /backup/restore': (req, body) => {
+      backupAuth(req);
+      backup.stageRestore(body.path);
+      setTimeout(onRestartRequested, 600); // after this response has been sent
+      return { ok: true, restarting: true };
+    },
   };
+
+  function backupAuth(req) {
+    if (!backup) throw new HttpError(404, 'not found'); // hosted server: no such feature
+    const u = auth(req);
+    if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden');
+    return u;
+  }
 
   const handler = async (req, res) => {
     const url = new URL(req.url, 'http://x');

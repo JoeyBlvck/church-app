@@ -1,6 +1,7 @@
 import { openDb } from './db.js';
 import { createApp } from './app.js';
 import { ensureSuperAdmin } from './platformAdmin.js';
+import { createBackupManager } from './backup.js';
 
 const secret = process.env.JWT_SECRET;
 if (!secret && process.env.NODE_ENV === 'production') throw new Error('JWT_SECRET required');
@@ -17,5 +18,17 @@ ensureSuperAdmin(db, process.env.SUPER_ADMIN_EMAIL, process.env.SUPER_ADMIN_PASS
 const appUrl = process.env.APP_URL ?? '';
 if (!appUrl) console.warn('APP_URL is not set — "forgot password" emails will not be sent (see server/src/email.js).');
 const port = Number(process.env.PORT ?? 8787);
-createApp(db, { secret: secret ?? 'dev-secret-change-me', appUrl }).listen(port, () =>
-  console.log(`church server on :${port}`));
+// Offline ("one PC") edition: started by local.js with LOCAL_EDITION=1. It only listens on this
+// computer itself (so Windows never asks about the firewall and nothing else on the church WiFi can
+// reach the data), and keeps dated backups -- see backup.js.
+const localEdition = process.env.LOCAL_EDITION === '1';
+let backup = null;
+if (localEdition) {
+  const dataDir = process.env.DATA_DIR;
+  const dbPath = process.env.DB_PATH;
+  if (!dataDir || !dbPath || !process.env.BACKUP_DIR) throw new Error('LOCAL_EDITION needs DATA_DIR, DB_PATH and BACKUP_DIR');
+  backup = createBackupManager({ db, dbPath, dataDir, defaultDir: process.env.BACKUP_DIR });
+  backup.start();
+}
+createApp(db, { secret: secret ?? 'dev-secret-change-me', appUrl, backup, localEdition })
+  .listen(port, localEdition ? '127.0.0.1' : undefined, () => console.log(`church server on :${port}${localEdition ? ' (this computer only)' : ''}`));
