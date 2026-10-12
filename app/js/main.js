@@ -436,6 +436,7 @@ async function desktopStatusBar(user, pending) {
     backupInfoAt = Date.now(); // set first, so a failing call isn't retried on every redraw
     try { backupInfo = await repo.backupStatus(); } catch { /* the bar just leaves the backup part out */ }
   }
+  repo.churchName().then(setDesktopTitle).catch(() => {});
   const saving = syncing || pending > 0;
   const left = lastError ? 'Church records are not responding' : saving ? 'Saving…' : 'All changes saved on this computer';
   let right = null;
@@ -455,9 +456,18 @@ const brandRowEl = () => h('div', { class: 'brand-row' }, h('span', { class: 'br
   h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
 const desktopFrame = (...body) => root.replaceChildren(h('div', { class: 'login-page desktop-welcome' },
   h('div', { class: 'card login-card' }, brandRowEl(), ...body)));
+// The native window title follows the church (the desktop shell exposes set_window_title).
+let lastTitle = '';
+async function setDesktopTitle(churchName) {
+  const title = churchName ? `${churchName} — The ChurchFlow` : 'The ChurchFlow';
+  if (title === lastTitle) return;
+  lastTitle = title;
+  try { await window.__TAURI__?.core?.invoke('set_window_title', { title }); } catch { /* title is cosmetic */ }
+}
 const NO_RECORDS = 'The church records are not responding. Close The ChurchFlow and open it again.';
 
 async function renderDesktopWelcome() {
+  setDesktopTitle('');
   let health;
   try { health = await repo.health(); } catch {
     return desktopFrame(h('h1', {}, 'Starting up…'),
@@ -570,6 +580,39 @@ function openRecovery(prefill) {
   body.append(form);
   const m = modal('Forgot your password?', body);
   (prefill ? codeIn : emailIn).focus();
+}
+
+// The menu bar (File / Edit / Go / Help) lives in the desktop shell (src-tauri/src/lib.rs); choosing
+// an item calls this with the item's id.
+if (isLocalEdition) {
+  window.__cfMenu = async (id) => {
+    try {
+      if (id.startsWith('go_')) {
+        const label = LABEL[id.slice(3)];
+        [...document.querySelectorAll('.shell > nav .navlinks button')].find((b) => b.textContent.trim() === label)?.click();
+      } else if (id === 'backup_now') {
+        if (!(await repo.user())) return toast('Sign in first, then back up.', 'err');
+        const r = await repo.runBackup();
+        const bad = r.results?.find((x) => !x.ok);
+        toast(bad ? `Backup problem: ${bad.error}` : 'Backup saved.', bad ? 'err' : 'ok');
+        backupInfoAt = 0; render();
+      } else if (id === 'backup_settings') {
+        if (!(await repo.user())) return;
+        setTab('settings'); render().then(() => document.getElementById('backup-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      } else if (id === 'sign_out') {
+        document.querySelector('button.signout')?.click();
+      } else if (id === 'help') {
+        if (!(await repo.user())) return;
+        setTab('settings'); render().then(() => document.getElementById('help-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+      } else if (id === 'about') {
+        modal('About The ChurchFlow', h('div', {},
+          h('p', {}, h('b', {}, 'The ChurchFlow'), ' — offline edition'),
+          h('p', { class: 'hint' }, `Version ${APP_VERSION}`),
+          h('p', {}, "Your church's records are kept only on this computer, and backed up automatically (see Settings → Backups)."),
+          h('p', { class: 'hint' }, 'Made by Joey Studios.')));
+      }
+    } catch (ex) { toast(ex.status === 403 ? 'Only the church owner or an admin can do that.' : ex.message, 'err'); }
+  };
 }
 
 // Behaviour that makes it feel like installed software rather than a page: no browser right-click

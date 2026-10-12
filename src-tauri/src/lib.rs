@@ -25,6 +25,7 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use tauri::menu::{Menu, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 
 const LOCAL_PORT: u16 = 47821;
@@ -125,6 +126,52 @@ fn start_local_server(app: &tauri::AppHandle) -> Result<Option<Child>, String> {
     cmd.spawn().map(Some).map_err(|e| format!("Windows would not start the church server ({}): {e}", node.display()))
 }
 
+// The window title follows the church ("Grace Chapel -- The ChurchFlow"). The page asks for it: a
+// web page cannot change its own native window title.
+#[tauri::command]
+fn set_window_title(window: tauri::WebviewWindow, title: String) {
+    let _ = window.set_title(&title);
+}
+
+// The offline edition's menu bar (File / Edit / Go / Help), like any Windows program. Items only
+// carry an id; choosing one tells the page (window.__cfMenu in app/js/main.js) what to do, so the
+// real behaviour lives in one place with the rest of the app.
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let file = SubmenuBuilder::new(app, "File")
+        .text("backup_now", "Back up now")
+        .text("backup_settings", "Backup settings…")
+        .separator()
+        .text("sign_out", "Sign out")
+        .separator()
+        .quit()
+        .build()?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+    let go = SubmenuBuilder::new(app, "Go")
+        .text("go_dashboard", "Home")
+        .text("go_members", "Members")
+        .text("go_ministries", "Ministries")
+        .text("go_attendance", "Attendance")
+        .text("go_announcements", "Notices")
+        .text("go_programmes", "Programmes")
+        .text("go_finance", "Finance")
+        .text("go_reports", "Reports")
+        .text("go_settings", "Settings")
+        .build()?;
+    let help = SubmenuBuilder::new(app, "Help")
+        .text("help", "Help and Support")
+        .text("about", "About The ChurchFlow")
+        .build()?;
+    MenuBuilder::new(app).item(&file).item(&edit).item(&go).item(&help).build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -153,6 +200,12 @@ pub fn run() {
         // installer is not the cloud app's.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .invoke_handler(tauri::generate_handler![set_window_title])
+        .on_menu_event(|app, event| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.eval(&format!("window.__cfMenu && window.__cfMenu('{}')", event.id().0));
+            }
+        })
         .setup(|app| {
             // The window opens straight away. The server is started first, but the page itself waits
             // for it (app/js/main.js), so a slow start shows as "starting", never as an app that
@@ -190,6 +243,10 @@ pub fn run() {
                     "window.__CHURCHFLOW_LOCAL_API__ = 'http://127.0.0.1:{}';",
                     LOCAL_PORT
                 ));
+                match build_menu(app.handle()) {
+                    Ok(menu) => window = window.menu(menu),
+                    Err(e) => note(&format!("menu bar not created: {e}")),
+                }
             }
             if let Err(e) = window.build() {
                 show_error(&format!("The ChurchFlow window could not be opened: {e}\n\nIf this keeps happening, the Windows component \"WebView2\" may be missing or damaged."));
