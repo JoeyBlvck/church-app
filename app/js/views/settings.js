@@ -1,4 +1,4 @@
-import { h, field, val, opts, download, today, toast, confirmDialog, fmtDate, photoPicker } from '../ui.js';
+import { h, field, val, opts, download, today, toast, confirmDialog, fmtDate, photoPicker, modal } from '../ui.js';
 import { icon } from '../icons.js';
 import { toCSV } from '../csv.js';
 import { renderQrToCanvas, qrToSvgString } from '../vendor/qrcode.js';
@@ -193,6 +193,30 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
   // ---- Backups (offline edition): dated copies of everything on this computer, a daily one made
   // automatically, an optional second copy on a USB / external drive, and a way to put one back.
   // The records live only on this PC, so these copies are the church's only safety net.
+  // Offline edition, owner only: the one-time code that gets the owner back in after a forgotten
+  // password (there is no email to send a reset link to). Making a new one needs the current password.
+  function recoveryCard() {
+    const open = () => {
+      const pw = h('input', { type: 'password', required: true, autocomplete: 'current-password' });
+      const err = h('div', { class: 'err', role: 'alert' });
+      const body = h('div', {});
+      const form = h('form', { onsubmit: async (e) => {
+        e.preventDefault(); err.textContent = '';
+        try {
+          const r = await repo.newRecoveryCode(pw.value);
+          body.replaceChildren(h('p', {}, 'Here is your new recovery code. The old one no longer works. Write it down and keep it somewhere safe that is not on this computer.'),
+            h('div', { class: 'recovery-code selectable' }, r.recoveryCode),
+            h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Done')));
+        } catch (ex) { err.textContent = ex.message; }
+      } }, h('p', {}, 'Enter your password to create a new recovery code. It replaces the one you have now.'),
+        h('label', {}, 'Your password'), pw, err, h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Create new code')));
+      body.append(form);
+      const m = modal('New recovery code', body); pw.focus();
+    };
+    return h('div', { class: 'card' }, h('b', {}, 'Recovery code'),
+      h('p', { class: 'hint' }, 'If you forget your password, the recovery code saved when the church was set up lets you choose a new one. Lost it? Make a new one here.'),
+      h('p', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: open }, 'Create a new recovery code')));
+  }
   const backupCard = backupInfo && backupCardFor(backupInfo);
   function backupCardFor(info) {
     const when = (ms) => new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
@@ -242,7 +266,7 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
         info.files.length > 10 && h('p', { class: 'hint' }, `+ ${info.files.length - 10} older`)));
   }
 
-  const helpCard = h('div', { class: 'card' }, h('b', {}, 'Help & Support'),
+  const helpCard = h('div', { class: 'card', id: 'help-card' }, h('b', {}, 'Help & Support'),
     h('p', { class: 'hint' }, `The ChurchFlow v${APP_VERSION} \u00b7 by Joey Studios`),
     ...helpFaqs.map(([q, a]) => h('details', {}, h('summary', {}, q), h('p', { class: 'hint' }, a))),
     h('p', { class: 'actions' },
@@ -284,10 +308,12 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     h('div', { class: 'card' }, h('b', {}, 'Appearance'),
       h('p', { class: 'hint' }, 'Only affects this device/browser — everyone signed in here chooses their own.'), themeTabs),
     churchCard,
-    canManageChurch && h('div', { class: 'card' }, h('b', {}, 'SMS (Arkesel)'), smsForm),
-    canManageChurch && h('div', { class: 'card' }, h('b', {}, 'Online giving (Paystack)'), paystackForm),
-    canManageChurch && h('div', { class: 'card' }, h('b', {}, 'WhatsApp (broadcast + check-in)'), whatsappForm),
-    canViewCheckin && h('div', { class: 'card' }, h('b', {}, 'QR check-in'),
+    // Texts, online giving, WhatsApp, the phone check-in link and the clock-in device all need internet or a
+    // public web address, which the one-PC offline edition does not have -- so it doesn't show them.
+    !isLocalEdition && canManageChurch && h('div', { class: 'card' }, h('b', {}, 'SMS (Arkesel)'), smsForm),
+    !isLocalEdition && canManageChurch && h('div', { class: 'card' }, h('b', {}, 'Online giving (Paystack)'), paystackForm),
+    !isLocalEdition && canManageChurch && h('div', { class: 'card' }, h('b', {}, 'WhatsApp (broadcast + check-in)'), whatsappForm),
+    !isLocalEdition && canViewCheckin && h('div', { class: 'card' }, h('b', {}, 'QR check-in'),
       h('p', { class: 'hint' }, 'Display this on a screen or print it at the entrance — a member scans it with their own phone camera, enters their phone number, and is marked present for today. No account to connect, nothing to install.'),
       h('div', { class: 'checkin-qr-row' }, qrCanvas,
         h('div', { class: 'checkin-qr-actions' },
@@ -298,13 +324,14 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     canManageChurch && go && h('div', { class: 'card' }, h('b', {}, 'Staff & leaders'),
       h('p', { class: 'hint' }, 'Create logins for other office staff and ministry leaders, change roles, reset passwords, or deactivate an account.'),
       h('p', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => go('staff') }, icon('staff', { size: 15 }), 'Manage staff & leaders'))),
-    backupCard,
-    h('div', { class: 'card' }, h('b', {}, 'Sync & backup'), h('p', { class: 'hint' }, `Last synced: ${last ? new Date(last).toLocaleString() : 'never'} · ${pending} change${pending === 1 ? '' : 's'} waiting`),
+    backupCard && h('div', { id: 'backup-card' }, backupCard),
+    isLocalEdition && user.role === 'owner' && recoveryCard(),
+    !isLocalEdition && h('div', { class: 'card' }, h('b', {}, 'Sync & backup'), h('p', { class: 'hint' }, `Last synced: ${last ? new Date(last).toLocaleString() : 'never'} · ${pending} change${pending === 1 ? '' : 's'} waiting`),
       h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: async () => { await sync(); toast('Sync finished'); } }, 'Sync now'),
         h('button', { class: 'btn ghost', onclick: async () => download(`church-backup-${today()}.json`, await repo.backup(), 'application/json') }, icon('download', { size: 15 }), 'Download backup (JSON)'),
-        h('button', { class: 'btn ghost', onclick: async () => { if (!navigator.onLine) return toast('You need to be online.', 'err');
+        h('button', { class: 'btn ghost', onclick: async () => { if (!isLocalEdition && !navigator.onLine) return toast('You need to be online.', 'err');
           if (await confirmDialog('Re-download all data from the server? Use this if something looks out of date.', 'Re-download')) { try { await repo.resync(); toast('Data refreshed'); rerender(); } catch (e) { toast(e.message, 'err'); } } } }, icon('sync', { size: 15 }), 'Re-download data'))),
-    h('div', { class: 'card' }, h('b', {}, 'Clock-in device'),
+    !isLocalEdition && h('div', { class: 'card' }, h('b', {}, 'Clock-in device'),
       h('p', { class: 'hint' }, 'Pull the list of people already enrolled on the Hikvision face/fingerprint clock-in terminal, as a spreadsheet you can open in Excel — review and fill in the rest (phone, status, household…), then upload it under Members → "Upload member spreadsheet" to actually create or update those member records. This only works when this app is running on a computer on the same network as the device (see README, "Hikvision clock-in integration").'),
       h('p', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: async (e) => {
         const btn = e.currentTarget; btn.disabled = true;

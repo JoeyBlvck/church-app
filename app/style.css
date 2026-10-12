@@ -810,3 +810,51 @@ ul.plain { list-style:none; margin:8px 0 0; padding:0; } ul.plain li { padding:7
   background:linear-gradient(90deg, var(--primary), var(--accent)); box-shadow:0 0 8px rgba(12,117,111,.5);
   opacity:0; transition:width .25s ease-out, opacity .25s ease; }
 @media (prefers-reduced-motion: reduce) { .top-progress { transition:opacity .25s ease; } }
+
+/* =====================================================================================
+   Desktop (offline, one-PC) edition. Everything here is scoped to html.desktop, which index.html
+   sets only when the installer's own church server is present, so the website and the cloud
+   desktop app look exactly as before. The aim: behave like installed software -- the PC's own
+   font, buttons that don't change the cursor, interface text that can't be dragged-selected by
+   accident, a status bar along the bottom, quiet scrollbars.
+   ===================================================================================== */
+html.desktop body { font-family:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif; font-feature-settings:normal;
+  -webkit-user-select:none; user-select:none; cursor:default; overscroll-behavior:none; }
+html.desktop input, html.desktop textarea, html.desktop select, html.desktop table, html.desktop .selectable,
+html.desktop .kv, html.desktop pre, html.desktop .err, html.desktop .modal-body p { -webkit-user-select:text; user-select:text; }
+html.desktop button, html.desktop .btn, html.desktop summary, html.desktop [role="button"], html.desktop label, html.desktop select,
+html.desktop .account.click, html.desktop .nav-title, html.desktop nav button { cursor:default; }
+html.desktop input[type="text"], html.desktop input[type="search"], html.desktop input[type="email"], html.desktop input[type="tel"],
+html.desktop input[type="password"], html.desktop input[type="number"], html.desktop textarea { cursor:text; }
+html.desktop a { cursor:default; }
+html.desktop img { -webkit-user-drag:none; user-drag:none; }
+html.desktop ::-webkit-scrollbar { width:13px; height:13px; }
+html.desktop ::-webkit-scrollbar-track { background:transparent; }
+html.desktop ::-webkit-scrollbar-thumb { background:color-mix(in srgb, var(--mute) 40%, transparent); border:3px solid transparent; background-clip:content-box; border-radius:8px; }
+html.desktop ::-webkit-scrollbar-thumb:hover { background:color-mix(in srgb, var(--mute) 65%, transparent); background-clip:content-box; }
+
+/* status bar along the bottom of the window (replaces the "Online / Sync now" strip of the web app) */
+html.desktop .shell { padding-bottom:28px; }
+.statusbar { position:fixed; left:0; right:0; bottom:0; height:28px; z-index:50; display:flex; align-items:center; gap:8px; padding:0 14px;
+  background:var(--panel); border-top:1px solid var(--line); font-size:12px; color:var(--mute); }
+.statusbar .sb-spacer { flex:1; }
+.statusbar .dot { width:8px; height:8px; border-radius:50%; background:var(--good, #2e9e6b); flex-shrink:0; }
+.statusbar .dot.off { background:var(--bad, #d4493e); }
+.statusbar .dot.busy { background:var(--warn, #d99a1e); }
+.statusbar .link { background:none; border:0; padding:0; font:inherit; color:inherit; cursor:default; }
+.statusbar .link:hover { color:var(--ink); text-decoration:underline; }
+.statusbar .link.warn { color:var(--bad, #d4493e); font-weight:600; }
+.statusbar .sb-ver { opacity:.7; }
+@media (max-width:760px) { .statusbar { display:none; } html.desktop .shell { padding-bottom:0; } }
+
+/* first-run setup / sign-in / recovery */
+.desktop-welcome .login-card { width:min(460px,100%); }
+.wizard-dots { display:flex; gap:6px; margin:0 0 14px; }
+.wizard-dots span { height:5px; flex:1; border-radius:3px; background:var(--line); }
+.wizard-dots span.done { background:color-mix(in srgb, var(--primary) 55%, var(--line)); }
+.wizard-dots span.on { background:var(--primary); }
+.recovery-code { font:600 22px/1.3 ui-monospace,"Cascadia Mono",Consolas,monospace; letter-spacing:.12em; text-align:center; padding:18px 10px;
+  margin:6px 0 12px; border:2px dashed var(--line); border-radius:12px; background:var(--bg-base); color:var(--ink); }
+.check { display:flex; align-items:center; gap:8px; margin:18px 0 12px; font-size:14px; }
+.check input { width:auto; margin:0; }
+@media print { .desktop-welcome { background:#fff !important; } .desktop-welcome .login-card { box-shadow:none; border:0; } }

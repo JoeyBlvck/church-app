@@ -38,6 +38,17 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
       await rememberOfflineCredential(store, input.email, input.password, s);
       return s.user;
     },
+    // Offline edition only: first-run setup (creates the one church on this PC and signs in) and the
+    // owner's recovery code. The server answers 404 to the recovery routes on the hosted server.
+    health: () => http('GET', '/health'),
+    async registerLocalChurch(input) {
+      const s = await http('POST', '/auth/register-church', input);
+      await repo._startSession(s);
+      await rememberOfflineCredential(store, input.email, input.password, s);
+      return { user: s.user, recoveryCode: s.recoveryCode };
+    },
+    recoverPassword: (email, code, password) => http('POST', '/auth/recover', { email, code, password }),
+    newRecoveryCode: (password) => http('POST', '/auth/new-recovery-code', { password }),
     // Signing in with no internet at all: checks the password against this device's own saved
     // copy (offlineAuth.js) instead of asking the server, and restores whatever session was
     // cached the last time this account was online here. Only ever tried as a fallback once a

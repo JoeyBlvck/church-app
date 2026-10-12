@@ -78,6 +78,11 @@ export function openDb(path = ':memory:') {
       token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
       expires_at INTEGER NOT NULL, used_at INTEGER
     );
+    -- Offline edition only: the owner's one-time recovery code (there is no email to send a reset
+    -- link to on a PC with no internet). Only a hash is kept, so the code itself can't be read back.
+    CREATE TABLE IF NOT EXISTS recovery_codes (
+      user_id TEXT PRIMARY KEY REFERENCES users(id), code_hash TEXT NOT NULL, created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS records (
       tenant_id TEXT NOT NULL, collection TEXT NOT NULL, id TEXT NOT NULL,
       data TEXT NOT NULL, updated_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,

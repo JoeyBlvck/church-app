@@ -14,7 +14,7 @@ const root = document.getElementById('app');
 // away from it. setTab() is the one place `tab` changes so every navigation keeps this in sync;
 // render()'s own role-based fallback (a tab the signed-in role can't see, or none saved yet)
 // still applies on top of whatever was restored here.
-let tab = localStorage.getItem('tab') || null, online = navigator.onLine, syncing = false, lastError = '', renderId = 0, pendingMemberQuery = '', pendingMinistryId = '';
+let tab = localStorage.getItem('tab') || null, online = isLocalEdition || navigator.onLine, syncing = false, lastError = '', renderId = 0, pendingMemberQuery = '', pendingMinistryId = '';
 // Switching to a genuinely different screen scrolls back to the top, the way a fresh page load
 // would — without this, leaving a screen you'd scrolled down (e.g. Settings) carries that same
 // scroll position into whatever you open next. A rerender of the SAME tab (saving a form, a
@@ -22,7 +22,11 @@ let tab = localStorage.getItem('tab') || null, online = navigator.onLine, syncin
 let navPending = false; // set when the screen is changing, so render() shows the top progress bar for that one
 function setTab(t) { if (t !== tab) { window.scrollTo(0, 0); if (t) navPending = true; } tab = t; try { if (t) localStorage.setItem('tab', t); else localStorage.removeItem('tab'); } catch {} }
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+if (isLocalEdition && 'serviceWorker' in navigator) {
+  // The desktop app ships its pages inside the installer, so a cached copy from an older version
+  // could only ever get in the way: make sure none is kept.
+  navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+} else if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   // clients.claim() (in sw.js) makes a brand-new install fire 'controllerchange' too, on this
   // very first load — reloading then would wipe in-progress UI (e.g. a half-filled form) for
   // no reason. Only reload when a service worker was ALREADY controlling this page, i.e. a
@@ -122,7 +126,8 @@ const isEditingPage = () => {
 };
 
 async function sync({ quiet = true } = {}) {
-  if (syncing || !navigator.onLine || !(await repo.user())) return;
+  // The desktop edition's server is on this same PC, so "no internet" never means it can't sync.
+  if (syncing || (!isLocalEdition && !navigator.onLine) || !(await repo.user())) return;
   syncing = true; lastError = '';
   if (!quiet) progress.start(); // only an explicit "Sync now" -- the automatic once-a-minute sync stays invisible
   // Skip re-rendering (but let the sync itself still run and still reach the server) while the
@@ -200,7 +205,7 @@ function globalSearchBar(tabs, members, ministries, programmes, notices) {
   };
 
   let debounceT;
-  const input = h('input', { name: 'q', type: 'search', placeholder: 'Search members, ministries, programmes, notices…', 'aria-label': 'Search everything',
+  const input = h('input', { name: 'q', type: 'search', placeholder: isLocalEdition ? 'Search everything  (Ctrl+K)' : 'Search members, ministries, programmes, notices…', 'aria-label': 'Search everything',
     oninput: (e) => { clearTimeout(debounceT); const v = e.target.value; debounceT = setTimeout(() => runSearch(v), 150); },
     onfocus: (e) => { if (e.target.value.trim()) runSearch(e.target.value); },
     onkeydown: (e) => { if (e.key === 'Escape') { setOpen(false); e.target.blur(); } },
@@ -343,7 +348,8 @@ async function renderScreen() {
   let view;
   try { const viewFn = await loadView(tab); view = await viewFn(ctx); } catch (e) { console.error(e); view = h('div', { class: 'card' }, h('p', { class: 'err' }, 'Something went wrong showing this screen.'), h('pre', { class: 'hint' }, String(e.message))); }
   if (id !== renderId) return; // a newer render started while this one was loading
-  const status = h('div', { class: 'status', role: 'status' }, h('span', { class: online ? 'dot' : 'dot off' }),
+  const status = isLocalEdition ? h('div', { class: 'status' }) // desktop: the status lives in the bottom status bar instead
+    : h('div', { class: 'status', role: 'status' }, h('span', { class: online ? 'dot' : 'dot off' }),
     !online ? 'Offline — changes are saved on this device' : syncing ? 'Syncing…' : lastError || 'Online',
     pending ? ` · ${pending} waiting to sync` : ' · all saved');
   const topBar = [status];
@@ -358,7 +364,7 @@ async function renderScreen() {
     avatar(user.name, user.photo, 34), h('div', { class: 'who' }, h('b', {}, user.name), h('small', {}, user.role))));
   // While a sync is running the button shows a spinner and is disabled (it also can't stack a
   // second sync -- sync() itself bails if one is already in progress).
-  topBar.push(h('button', { class: `btn ghost sm${syncing ? ' busy' : ''}`, disabled: syncing, onclick: () => sync({ quiet: false }) },
+  if (!isLocalEdition) topBar.push(h('button', { class: `btn ghost sm${syncing ? ' busy' : ''}`, disabled: syncing, onclick: () => sync({ quiet: false }) },
     syncing ? h('span', { class: 'spinner', 'aria-hidden': 'true' }) : icon('sync', { size: 16 }), syncing ? 'Syncing…' : 'Sync now'));
   // one uppercase "nav-title" header per group, only where the group actually changes —
   // this keeps role-specific tab lists (which may skip a group entirely) from showing an
@@ -402,9 +408,188 @@ async function renderScreen() {
     h('nav', {}, h('div', { class: 'brand' }, brandMark,
         h('h1', {}, 'The Church', h('span', {}, 'Flow'), h('small', {}, churchSettings.motto || 'Church management'))),
       h('div', { class: 'navlinks' }, navItems),
-      h('button', { class: 'signout', onclick: async () => { if (!pending || confirm(`${pending} changes haven't synced yet. They'll be kept if you sign back into this church on this device, but lost if a different church signs in here first. Sign out anyway?`)) { await repo.logout(); setTab(null); render(); } } }, h('span', { class: 'ico' }, icon('signout')), h('span', {}, 'Sign out'))),
+      h('button', { class: 'signout', onclick: async () => {
+        if (isLocalEdition) await sync(); // make sure everything is saved to this PC's records first
+        else if (pending && !confirm(`${pending} changes haven't synced yet. They'll be kept if you sign back into this church on this device, but lost if a different church signs in here first. Sign out anyway?`)) return;
+        await repo.logout(); setTab(null); render();
+      } }, h('span', { class: 'ico' }, icon('signout')), h('span', {}, 'Sign out'))),
     h('main', {}, h('div', { class: 'bar top' }, topBar), h('div', { class: 'view-enter' }, view)),
-    mobileTabbar));
+    mobileTabbar,
+    isLocalEdition && await desktopStatusBar(user, pending)));
+}
+
+// ======================= desktop (offline, one-PC) edition =======================
+// Everything below only runs in the offline installer (isLocalEdition): the hosted app and the
+// cloud desktop app never reach any of it. It replaces the website-style marketing sign-in with a
+// small first-run setup and a plain sign-in, adds a status bar, and gives owners a recovery code
+// (a PC with no internet cannot email a "reset your password" link).
+const fmtWhen = (ms) => {
+  const d = new Date(ms), now = new Date();
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `today at ${time}`;
+  if (new Date(now - 86_400_000).toDateString() === d.toDateString()) return `yesterday at ${time}`;
+  return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} at ${time}`;
+};
+let backupInfo = null, backupInfoAt = 0;
+async function desktopStatusBar(user, pending) {
+  if (['owner', 'admin'].includes(user.role) && Date.now() - backupInfoAt > 15_000) {
+    backupInfoAt = Date.now(); // set first, so a failing call isn't retried on every redraw
+    try { backupInfo = await repo.backupStatus(); } catch { /* the bar just leaves the backup part out */ }
+  }
+  const saving = syncing || pending > 0;
+  const left = lastError ? 'Church records are not responding' : saving ? 'Saving…' : 'All changes saved on this computer';
+  let right = null;
+  if (['owner', 'admin'].includes(user.role) && backupInfo) {
+    const last = backupInfo.last, failed = last?.results?.some((r) => !r.ok);
+    const stale = !last || Date.now() - last.at > 2 * 86_400_000;
+    right = h('button', { class: `link ${failed || stale ? 'warn' : ''}`, title: 'Open backup settings',
+      onclick: () => { setTab('settings'); render().then(() => document.getElementById('backup-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); } },
+      failed ? 'Last backup had a problem — click to check' : last ? `Last backup: ${fmtWhen(last.at)}` : 'No backup yet — click to back up');
+  }
+  return h('footer', { class: 'statusbar noprint', role: 'status' },
+    h('span', { class: lastError ? 'dot off' : saving ? 'dot busy' : 'dot' }), h('span', {}, left),
+    h('span', { class: 'sb-spacer' }), right, h('span', { class: 'sb-ver' }, `v${APP_VERSION}`));
+}
+
+const brandRowEl = () => h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark' }, brandLogo()),
+  h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
+const desktopFrame = (...body) => root.replaceChildren(h('div', { class: 'login-page desktop-welcome' },
+  h('div', { class: 'card login-card' }, brandRowEl(), ...body)));
+const NO_RECORDS = 'The church records are not responding. Close The ChurchFlow and open it again.';
+
+async function renderDesktopWelcome() {
+  let health;
+  try { health = await repo.health(); } catch {
+    return desktopFrame(h('h1', {}, 'Starting up…'),
+      h('p', { class: 'subtitle' }, 'The church records are not ready yet. If this stays on screen, close The ChurchFlow and open it again.'),
+      h('p', {}, h('button', { class: 'btn block', onclick: () => render() }, 'Try again')));
+  }
+  return health.setupNeeded ? drawSetup() : drawSignIn();
+}
+
+function drawSignIn() {
+  const err = h('div', { class: 'err', role: 'alert' });
+  let saved = ''; try { saved = localStorage.getItem('lastEmail') || ''; } catch {}
+  const emailInput = h('input', { name: 'email', type: 'email', required: true, autocomplete: 'username', value: saved });
+  const f = h('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    const btn = f.querySelector('button:not([type=button])'); btn.disabled = true; err.textContent = '';
+    progress.start();
+    try {
+      await repo.login(emailInput.value.trim(), f.elements.password.value);
+      try { localStorage.setItem('lastEmail', emailInput.value.trim()); } catch {}
+      await sync(); render();
+    } catch (ex) {
+      err.textContent = isNetworkError(ex) ? NO_RECORDS : ex.status === 401 ? 'Wrong email or password.' : ex.message;
+      btn.disabled = false;
+    } finally { progress.done(); }
+  } },
+    h('label', {}, 'Email'), emailInput,
+    passwordField('Password', { autocomplete: 'current-password' }), err,
+    h('p', { class: 'forgot-link' }, h('a', { href: '#', onclick: (e) => { e.preventDefault(); openRecovery(emailInput.value.trim()); } }, 'Forgot password?')),
+    h('p', {}, h('button', { class: 'btn block' }, 'Sign in')));
+  desktopFrame(h('h1', {}, 'Sign in'), h('p', { class: 'subtitle' }, 'Enter your email and password to open the church records.'), f);
+  (saved ? f.elements.password : emailInput).focus();
+}
+
+// First run on a new PC: three short steps (church, sign-in details, recovery code), then straight
+// into the app already signed in.
+function drawSetup() {
+  const d = { churchName: '', name: '' };
+  const dots = (n) => h('div', { class: 'wizard-dots', 'aria-label': `Step ${n} of 3` }, [1, 2, 3].map((i) => h('span', { class: i === n ? 'on' : i < n ? 'done' : '' })));
+  const step1 = () => {
+    const f = h('form', { onsubmit: (e) => { e.preventDefault(); d.churchName = f.elements.church.value.trim(); d.name = f.elements.name.value.trim(); step2(); } },
+      h('label', {}, 'Church name'), h('input', { name: 'church', required: true, value: d.churchName, placeholder: 'e.g. Grace Chapel International' }),
+      h('label', {}, 'Your name'), h('input', { name: 'name', required: true, value: d.name, autocomplete: 'name' }),
+      h('p', { class: 'hint' }, 'You will be the owner of the church records on this computer. You can add other staff and leaders afterwards.'),
+      h('p', {}, h('button', { class: 'btn block' }, 'Continue')));
+    desktopFrame(dots(1), h('h1', {}, 'Welcome to The ChurchFlow'),
+      h('p', { class: 'subtitle' }, "Let's set up your church. It takes about a minute, and everything stays on this computer."), f);
+    f.elements.church.focus();
+  };
+  const step2 = () => {
+    const err = h('div', { class: 'err', role: 'alert' });
+    const confirmIn = h('input', { name: 'confirm', type: 'password', required: true, autocomplete: 'new-password' });
+    const f = h('form', { onsubmit: async (e) => {
+      e.preventDefault(); err.textContent = '';
+      const pw = f.elements.password.value;
+      if (pw !== confirmIn.value) { err.textContent = "The two passwords don't match."; return; }
+      const email = f.elements.email.value.trim();
+      const btn = f.querySelector('button:not([type=button])'); btn.disabled = true; progress.start();
+      try {
+        const { recoveryCode } = await repo.registerLocalChurch({ churchName: d.churchName, name: d.name, email, password: pw });
+        try { localStorage.setItem('lastEmail', email); } catch {}
+        step3(recoveryCode);
+      } catch (ex) { err.textContent = isNetworkError(ex) ? NO_RECORDS : ex.message; btn.disabled = false; }
+      finally { progress.done(); }
+    } },
+      h('label', {}, 'Email (you will sign in with this)'), h('input', { name: 'email', type: 'email', required: true, autocomplete: 'username' }),
+      passwordField('Password', { autocomplete: 'new-password', withStrength: true }),
+      h('label', {}, 'Type the password again'), confirmIn, err,
+      h('p', { class: 'actions' }, h('button', { type: 'button', class: 'btn ghost', onclick: step1 }, 'Back'), h('button', { class: 'btn' }, 'Create church')));
+    desktopFrame(dots(2), h('h1', {}, 'Create your sign-in'), h('p', { class: 'subtitle' }, `For ${d.churchName}. Use at least 8 characters.`), f);
+    f.elements.email.focus();
+  };
+  const step3 = (code) => {
+    const ok = h('input', { type: 'checkbox' });
+    const finish = h('button', { class: 'btn block', disabled: true, onclick: async () => { await sync(); render(); } }, 'Finish and open The ChurchFlow');
+    ok.onchange = () => { finish.disabled = !ok.checked; };
+    desktopFrame(dots(3), h('h1', {}, 'Save your recovery code'),
+      h('p', { class: 'subtitle' }, 'If you ever forget your password, this code is how you get back in. It is shown only once.'),
+      h('div', { class: 'recovery-code selectable', 'aria-label': 'Recovery code' }, code),
+      h('p', { class: 'hint' }, "Write it down or print it, and keep it somewhere safe that is not on this computer — with the church treasurer or in the pastor's file, for example."),
+      h('p', { class: 'actions noprint' },
+        h('button', { type: 'button', class: 'btn ghost', onclick: () => window.print() }, icon('print', { size: 15 }), 'Print'),
+        h('button', { type: 'button', class: 'btn ghost', onclick: async () => { try { await navigator.clipboard.writeText(code); toast('Code copied'); } catch { toast('Could not copy — please write it down instead.', 'err'); } } }, 'Copy')),
+      h('label', { class: 'check noprint' }, ok, ' I have saved my recovery code'),
+      h('p', { class: 'noprint' }, finish));
+  };
+  step1();
+}
+
+function openRecovery(prefill) {
+  const emailIn = h('input', { type: 'email', required: true, value: prefill || '', autocomplete: 'username' });
+  const codeIn = h('input', { required: true, placeholder: 'XXXX-XXXX-XXXX-XXXX', autocomplete: 'off', spellcheck: false, style: 'text-transform:uppercase;letter-spacing:.08em' });
+  const err = h('div', { class: 'err', role: 'alert' });
+  const body = h('div', {});
+  const form = h('form', { onsubmit: async (e) => {
+    e.preventDefault(); err.textContent = '';
+    const btn = form.querySelector('button:not([type=button])'); btn.disabled = true;
+    try {
+      const r = await repo.recoverPassword(emailIn.value.trim(), codeIn.value, form.elements.password.value);
+      body.replaceChildren(h('p', {}, 'Your password has been changed. Here is your NEW recovery code — the old one no longer works. Write it down.'),
+        h('div', { class: 'recovery-code selectable' }, r.recoveryCode),
+        h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: () => m.close() }, 'Done — back to sign in')));
+    } catch (ex) { err.textContent = isNetworkError(ex) ? NO_RECORDS : ex.message; btn.disabled = false; }
+  } },
+    h('p', {}, 'Enter the email on the owner account, the recovery code you saved when the church was set up, and a new password.'),
+    h('p', { class: 'hint' }, 'Not the owner? Ask the church owner to reset your password in Settings → Staff & leaders.'),
+    h('label', {}, 'Email'), emailIn, h('label', {}, 'Recovery code'), codeIn,
+    passwordField('New password', { autocomplete: 'new-password', withStrength: true }), err,
+    h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Set new password')));
+  body.append(form);
+  const m = modal('Forgot your password?', body);
+  (prefill ? codeIn : emailIn).focus();
+}
+
+// Behaviour that makes it feel like installed software rather than a page: no browser right-click
+// menu or page zoom, F5 saves instead of reloading, and the usual keyboard shortcuts.
+if (isLocalEdition) {
+  addEventListener('contextmenu', (e) => { if (!e.target.closest?.('input, textarea, [contenteditable="true"], .selectable')) e.preventDefault(); });
+  addEventListener('wheel', (e) => { if (e.ctrlKey) e.preventDefault(); }, { passive: false });
+  addEventListener('dragstart', (e) => { if (['IMG', 'A'].includes(e.target.tagName)) e.preventDefault(); });
+  addEventListener('keydown', (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && ['+', '=', '-', '0'].includes(e.key)) return e.preventDefault();
+    if (e.key === 'F5' || (mod && e.key.toLowerCase() === 'r')) { e.preventDefault(); sync({ quiet: false }); return; }
+    if (mod && ['k', 'f'].includes(e.key.toLowerCase())) {
+      const i = document.querySelector('input[aria-label="Search everything"]');
+      if (i) { e.preventDefault(); i.focus(); i.select(); }
+      return;
+    }
+    if (e.key === 'F1') { e.preventDefault(); setTab('settings'); render().then(() => document.getElementById('help-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); return; }
+    if (mod && /^[1-9]$/.test(e.key)) { document.querySelectorAll('.shell > nav .navlinks button')[Number(e.key) - 1]?.click(); e.preventDefault(); }
+  });
 }
 
 // Two panes on a screen wide enough for them: a teal/navy info side (the same hero-gradient the
@@ -483,6 +668,7 @@ function renderResetPassword(token) {
 }
 
 function renderLogin() {
+  if (isLocalEdition) return renderDesktopWelcome(); // the offline edition has its own, simpler first screens
   let mode = 'login';
   // Set right after a successful registration so the login screen that follows can prefill the
   // email the person just chose — cleared as soon as it's been used, so it never leaks into a
@@ -568,8 +754,8 @@ function renderLogin() {
   draw();
 }
 
-addEventListener('online', () => { online = true; sync(); checkForUpdate(); });
-addEventListener('offline', () => { online = false; if (!isEditingPage()) render(); }); // don't wipe an in-progress form just to flip the status dot (see isEditingPage() above); it'll show on the next render regardless
+addEventListener('online', () => { if (isLocalEdition) return; online = true; sync(); checkForUpdate(); });
+addEventListener('offline', () => { if (isLocalEdition) return; online = false; if (!isEditingPage()) render(); }); // don't wipe an in-progress form just to flip the status dot (see isEditingPage() above); it'll show on the next render regardless
 
 // ---- auto sign-out after inactivity (browser/PWA only) ----------------------------------------
 // A shared church-office computer left signed in on a browser tab is easy to forget about; the

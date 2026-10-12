@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { randomUUID, randomBytes, createHash } from 'node:crypto';
+import { randomUUID, randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { hashPassword, verifyPassword, signToken, verifyToken } from './auth.js';
 import { COLLECTIONS, canRead, canWrite, ministryOf } from './permissions.js';
 import { normalizeGhanaPhone, sendSms, SmsConfigError } from './sms.js';
@@ -35,6 +35,8 @@ const RATE_LIMITED_ROUTES = new Map([
   ['POST /give/init', { windowMs: 60_000, max: 20 }],
   ['POST /auth/request-password-reset', { windowMs: 60_000, max: 5 }],
   ['POST /auth/reset-password', { windowMs: 60_000, max: 10 }],
+  ['POST /auth/recover', { windowMs: 60_000, max: 5 }],
+  ['POST /auth/new-recovery-code', { windowMs: 60_000, max: 5 }],
 ]);
 
 export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', sendPasswordResetEmailImpl, sendWelcomeEmailImpl,
@@ -245,6 +247,22 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
     return true;
   }
 
+  // ---- recovery codes (offline edition only) ----
+  // A PC with no internet can't email a reset link, so the owner gets a one-time recovery code when
+  // the church is set up: 16 letters/digits in four groups. Only its hash is stored. Using it sets a
+  // new password and immediately replaces it with a fresh code, so a used code is never valid again.
+  const CODE_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ'; // no 0/O/1/I: easy to read off a printout
+  const codeHash = (code) => createHash('sha256').update(String(code ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '')).digest('hex');
+  function issueRecoveryCode(userId) {
+    const bytes = randomBytes(16);
+    const raw = Array.from(bytes, (b) => CODE_CHARS[b % 32]).join('');
+    const code = raw.match(/.{4}/g).join('-');
+    db.prepare('INSERT INTO recovery_codes (user_id, code_hash, created_at) VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, created_at = excluded.created_at')
+      .run(userId, codeHash(code), Date.now());
+    return code;
+  }
+  const localOnly = () => { if (!localEdition) throw new HttpError(404, 'not found'); };
+
   // ---- routes ----
   const routes = {
     'POST /auth/register-church': (req, body) => {
@@ -259,7 +277,32 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       const tid = randomUUID(), uid = randomUUID();
       q.insTenant.run(tid, churchName, Date.now());
       q.insUser.run(uid, tid, email.toLowerCase(), name, hashPassword(password), 'owner', '[]');
-      return session(q.user.get(uid));
+      return localEdition ? { ...session(q.user.get(uid)), recoveryCode: issueRecoveryCode(uid) } : session(q.user.get(uid));
+    },
+
+    // Offline edition: the owner forgot the password -> email + recovery code -> new password (and a
+    // new recovery code, shown once). Anyone else asks the church's owner to reset theirs in Settings.
+    'POST /auth/recover': (req, body) => {
+      localOnly();
+      const email = (body.email ?? '').trim().toLowerCase();
+      if ((body.password ?? '').length < 8) throw new HttpError(400, 'Choose a password of at least 8 characters.');
+      const row = email && q.tenantByEmail.get(email);
+      const stored = row && db.prepare('SELECT code_hash FROM recovery_codes WHERE user_id = ?').get(row.id);
+      const a = Buffer.from(codeHash(body.code)), b = Buffer.from(stored?.code_hash ?? '0'.repeat(64));
+      if (!row || !row.active || !stored || a.length !== b.length || !timingSafeEqual(a, b))
+        throw new HttpError(400, 'That email and recovery code do not match. Check them and try again.');
+      q.setUserPassHash.run(hashPassword(body.password), row.id);
+      return { ok: true, recoveryCode: issueRecoveryCode(row.id) };
+    },
+
+    // Offline edition: a fresh recovery code on request (lost the printout). Needs the current password.
+    'POST /auth/new-recovery-code': (req, body) => {
+      localOnly();
+      const u = auth(req);
+      if (u.role !== 'owner') throw new HttpError(403, 'Only the church owner has a recovery code.');
+      const row = q.user.get(u.id);
+      if (!verifyPassword(body.password ?? '', row.pass_hash)) throw new HttpError(400, 'That password is not correct.');
+      return { recoveryCode: issueRecoveryCode(u.id) };
     },
 
     'POST /auth/login': (req, body) => {
@@ -1030,7 +1073,8 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
 
     'GET /me': (req) => { const u = auth(req); return { user: u, church: q.tenantById.get(u.tenantId)?.name }; },
 
-    'GET /health': () => ({ ok: true, localEdition }),
+    // setupNeeded: a brand-new offline PC with no church yet (the app shows its first-run setup screen).
+    'GET /health': () => ({ ok: true, localEdition, ...(localEdition && { setupNeeded: !db.prepare('SELECT 1 FROM tenants LIMIT 1').get() }) }),
 
     // ---- backups (offline edition only; see backup.js) ----
     // Only the owner/admin may see or change these: a backup holds every member's details and the

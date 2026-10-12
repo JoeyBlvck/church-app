@@ -19,9 +19,15 @@
 <!-- Inter, per the type spec the user shared. The app is local-first/offline-capable, so this is
      a progressive enhancement, not a dependency: font-display:swap shows the system-font fallback
      immediately, and body's font stack in style.css falls back to it seamlessly if this can't load. -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet">
+<script>
+  // The desktop (offline) edition is told where its own church server is before the page loads.
+  // It marks the page as desktop software (see "html.desktop" in style.css) and skips the web font:
+  // it uses the PC's own Segoe UI and must never wait on a font download that cannot happen.
+  if (window.__CHURCHFLOW_LOCAL_API__) { document.documentElement.classList.add('desktop'); }
+  else {
+    document.write('<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet">');
+  }
+</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
