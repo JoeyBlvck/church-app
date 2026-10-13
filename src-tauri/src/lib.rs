@@ -168,6 +168,10 @@ fn save_export(app: tauri::AppHandle, name: String, contents: String) -> Result<
         use std::os::windows::process::CommandExt;
         let _ = Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())).spawn();
     }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("open").arg("-R").arg(&path).spawn();
+    }
     Ok(path.to_string_lossy().to_string())
 }
 

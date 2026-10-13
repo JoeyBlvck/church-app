@@ -291,7 +291,7 @@ export function download(name, text, type = 'text/plain') {
   // The offline Windows app: its web view ignores a page's own download link, so the desktop shell
   // saves the file (src-tauri/src/lib.rs, save_export) into Downloads and shows it in Explorer.
   // A byte-order mark on CSVs makes Excel read names with accents correctly.
-  const invoke = window.__CHURCHFLOW_LOCAL_API__ && window.__TAURI__?.core?.invoke;
+  const invoke = window.__TAURI__?.core?.invoke;
   if (invoke) {
     invoke('save_export', { name, contents: type.includes('csv') ? `\uFEFF${text}` : text })
       .then((p) => toast(`Saved in your Downloads folder as “${String(p).split(/[\\/]/).pop()}”.`))
