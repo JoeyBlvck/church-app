@@ -805,9 +805,10 @@ addEventListener('offline', () => { if (isLocalEdition) return; online = false; 
 
 // ---- auto sign-out after inactivity (browser/PWA only) ----------------------------------------
 // A shared church-office computer left signed in on a browser tab is easy to forget about; the
-// Tauri desktop build (see isTauri in config.js) is skipped, since that's a device someone already
+// cloud Tauri desktop build (see isTauri in config.js) is skipped, since that's a device someone already
 // had to be signed into on their own — leaving it open isn't the same exposure as a browser tab.
-const IDLE_LIMIT_MS = 30 * 60_000; // no mouse/keyboard/touch activity for this long...
+// The shared church PC locks itself sooner than a website tab does.
+const IDLE_LIMIT_MS = (isLocalEdition ? 15 : 30) * 60_000; // no mouse/keyboard/touch activity for this long...
 const IDLE_WARNING_MS = 60_000;    // ...shows this countdown before actually signing out
 // Everything is measured against the wall clock (Date.now()) rather than counting timer ticks:
 // browsers slow timers down in background tabs and stop them entirely while a laptop sleeps, so a
@@ -826,7 +827,7 @@ async function idleSignOut() {
     await repo.logout();
     setTab(null);
     render();
-    toast('Signed out after 30 minutes of inactivity.');
+    toast(`Signed out after ${IDLE_LIMIT_MS / 60_000} minutes of inactivity.`);
   } finally { idleSigningOut = false; lastActivity = Date.now(); }
 }
 
@@ -867,7 +868,7 @@ function resetIdleTimer(force = false) {
   if (idleModal) { idleModal.close(); idleModal = null; }
 }
 
-if (!isTauri) {
+if (!isTauri || isLocalEdition) {
   // 'scroll' is left out on purpose: it also fires when the page scrolls itself (a screen
   // re-rendering, a sync finishing), which is not the person being there.
   ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>

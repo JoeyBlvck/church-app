@@ -133,6 +133,44 @@ fn set_window_title(window: tauri::WebviewWindow, title: String) {
     let _ = window.set_title(&title);
 }
 
+// Exports (CSV, etc.). The Windows web view silently ignores a page's own "download this file"
+// link, so the page hands the file to this command instead: it is saved in the person's Downloads
+// folder (never overwriting an existing file) and Explorer opens with it selected. Returns the
+// full path so the page can say where it went.
+#[tauri::command]
+fn save_export(app: tauri::AppHandle, name: String, contents: String) -> Result<String, String> {
+    let dir = app
+        .path()
+        .download_dir()
+        .or_else(|_| app.path().document_dir())
+        .map_err(|e| format!("Could not find the Downloads folder: {e}"))?;
+    let dir = plain(dir);
+    fs::create_dir_all(&dir).map_err(|e| format!("Could not open the Downloads folder: {e}"))?;
+    // Only a plain file name: no folders, none of the characters Windows does not allow.
+    let clean: String = name
+        .chars()
+        .map(|c| if "<>:\"/\\|?*".contains(c) || c.is_control() { '_' } else { c })
+        .collect();
+    let clean = if clean.trim().is_empty() { "export.txt".to_string() } else { clean };
+    let (stem, ext) = match clean.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (clean.clone(), String::new()),
+    };
+    let mut path = dir.join(&clean);
+    let mut n = 1;
+    while path.exists() {
+        path = dir.join(format!("{stem} ({n}){ext}"));
+        n += 1;
+    }
+    fs::write(&path, contents).map_err(|e| format!("Could not save the file: {e}"))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = Command::new("explorer").raw_arg(format!("/select,\"{}\"", path.display())).spawn();
+    }
+    Ok(path.to_string_lossy().to_string())
+}
+
 // The offline edition's menu bar (File / Edit / Go / Help), like any Windows program. Items only
 // carry an id; choosing one tells the page (window.__cfMenu in app/js/main.js) what to do, so the
 // real behaviour lives in one place with the rest of the app.
@@ -200,7 +238,7 @@ pub fn run() {
         // installer is not the cloud app's.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![set_window_title])
+        .invoke_handler(tauri::generate_handler![set_window_title, save_export])
         .on_menu_event(|app, event| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.eval(&format!("window.__cfMenu && window.__cfMenu('{}')", event.id().0));
