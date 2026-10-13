@@ -454,8 +454,11 @@ async function desktopStatusBar(user, pending) {
 
 const brandRowEl = () => h('div', { class: 'brand-row' }, h('span', { class: 'brand-mark' }, brandLogo()),
   h('div', { class: 'wordmark' }, 'The Church', h('span', {}, 'Flow')));
+const COPYRIGHT = `© ${new Date().getFullYear()} Joey Studios. All rights reserved.`;
 const desktopFrame = (...body) => root.replaceChildren(h('div', { class: 'login-page desktop-welcome' },
-  h('div', { class: 'card login-card' }, brandRowEl(), ...body)));
+  h('div', { class: 'welcome-col' },
+    h('div', { class: 'card login-card' }, brandRowEl(), ...body),
+    h('p', { class: 'copyright' }, COPYRIGHT))));
 // The native window title follows the church (the desktop shell exposes set_window_title).
 let lastTitle = '';
 async function setDesktopTitle(churchName) {
@@ -609,7 +612,7 @@ if (isLocalEdition) {
           h('p', {}, h('b', {}, 'The ChurchFlow'), ' — offline edition'),
           h('p', { class: 'hint' }, `Version ${APP_VERSION}`),
           h('p', {}, "Your church's records are kept only on this computer, and backed up automatically (see Settings → Backups)."),
-          h('p', { class: 'hint' }, 'Made by Joey Studios.')));
+          h('p', { class: 'hint' }, COPYRIGHT)));
       }
     } catch (ex) { toast(ex.status === 403 ? 'Only the church owner or an admin can do that.' : ex.message, 'err'); }
   };
@@ -897,5 +900,9 @@ setInterval(() => { checkForUpdate(); }, 4 * 60 * 60_000);
 // updater.js's own note on why. render() itself is what shows the sign-in screen once there's no
 // session for it to find.
 (isLocalEdition ? (progress.start(), repo.waitUntilUp().finally(() => progress.done())) : Promise.resolve())
+  // The offline edition runs on one shared church PC: closing the program ends the session, so the
+  // next person who opens it always lands on the sign-in screen. Anything not yet saved stays on
+  // this PC and is saved to the church records after the next sign-in.
+  .then(() => isLocalEdition && repo.logout())
   .then(() => signOutIfInstalledOutsideUpdater(repo))
   .then(() => render().then(() => { sync(); checkForUpdate(); }));

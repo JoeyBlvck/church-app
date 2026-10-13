@@ -213,7 +213,14 @@ pub fn run() {
             let mut offline = false;
             let mut child = None;
             if local_server_up() {
-                // Already answering (a second window of the app, say): use it as it is.
+                if app.config().identifier.ends_with(".offline") {
+                    // A second copy of the program: the first one owns the church records, and the
+                    // records stop when it closes. Better to say so than to open a window that
+                    // would break the moment the first is closed.
+                    show_error("The ChurchFlow is already open. Look for it on the taskbar at the bottom of the screen. If you cannot find it, restart the computer and open it again.");
+                    std::process::exit(0);
+                }
+                // Already answering (the cloud edition during development, say): use it as it is.
                 offline = true;
                 note("a server is already running; using it");
             } else {
@@ -243,6 +250,7 @@ pub fn run() {
                     "window.__CHURCHFLOW_LOCAL_API__ = 'http://127.0.0.1:{}';",
                     LOCAL_PORT
                 ));
+                window = window.maximized(true);
                 match build_menu(app.handle()) {
                     Ok(menu) => window = window.menu(menu),
                     Err(e) => note(&format!("menu bar not created: {e}")),
