@@ -1,10 +1,11 @@
 // Staff accounts + announcements board
 import { icon } from '../icons.js';
 import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, bulkBar } from '../ui.js';
+import { isLocalEdition } from '../config.js';
 
 export async function staffView({ repo, ministries, rerender }) {
   let list = [], err = '';
-  try { list = await repo.listStaff(); } catch { err = 'Connect to the internet to manage staff accounts.'; }
+  try { list = await repo.listStaff(); } catch { err = isLocalEdition ? 'The church records are not responding. Close The ChurchFlow and open it again.' : 'Connect to the internet to manage staff accounts.'; }
   const mName = Object.fromEntries(ministries.map((m) => [m.id, m.name]));
   const ROLE_HELP = { admin: 'Everything except the owner account', secretary: 'Members, attendance, announcements', treasurer: 'Finance and pledges', leader: 'Only their own ministry' };
 
@@ -43,8 +44,8 @@ export async function announcementsView({ repo, user, ministries, rerender }) {
   const canPost = user.role !== 'treasurer' && user.role !== 'leader'; // matches who the server lets post 'messages' and send SMS
   const [log, smsConfig, whatsappConfig] = await Promise.all([
     repo.list('messages').then((l) => l.sort((a, b) => (b.date + (b.at ?? 0)).localeCompare(a.date + (a.at ?? 0)))),
-    canPost ? repo.getSmsConfig().catch(() => ({ configured: false })) : { configured: false },
-    canPost ? repo.getWhatsappConfig().catch(() => ({ configured: false })) : { configured: false },
+    canPost && !isLocalEdition ? repo.getSmsConfig().catch(() => ({ configured: false })) : { configured: false },
+    canPost && !isLocalEdition ? repo.getWhatsappConfig().catch(() => ({ configured: false })) : { configured: false },
   ]);
   const mName = Object.fromEntries(ministries.map((m) => [m.id, m.name]));
   const sortedMinistries = ministries.slice().sort(byName);
@@ -113,14 +114,15 @@ export async function announcementsView({ repo, user, ministries, rerender }) {
   } },
     h('div', { class: 'row' }, field('Audience', h('select', { name: 'ministryId' }, h('option', { value: '' }, 'Whole church'), opts(sortedMinistries.map((m) => [m.id, m.name])))),
       field('Announcement', h('textarea', { name: 'text', rows: 3, required: true, placeholder: 'Sunday service starts at 8am. Harvest planning meeting after church…' }))),
-    smsConfig.configured
+    // The offline edition has no internet, so no texting or WhatsApp -- and no "set it up" hints for them.
+    isLocalEdition ? null : smsConfig.configured
       ? h('div', {}, h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'sms', onchange: (e) => { smsTargets.hidden = !e.target.checked; } }), ' Also send as SMS to members’ phones (via Arkesel)'), smsTargets)
       : h('p', { class: 'hint' }, 'Set up an SMS sender under Settings → SMS to also text this to members’ phones.'),
-    whatsappConfig.configured
+    isLocalEdition ? null : whatsappConfig.configured
       ? h('div', {}, h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'wa', onchange: (e) => { waTargets.hidden = !e.target.checked; } }), ' Also send as a WhatsApp broadcast'), waTargets)
       : h('p', { class: 'hint' }, 'Set up WhatsApp under Settings → WhatsApp to also broadcast this on WhatsApp.'),
     h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Post announcement')));
-  return h('div', {}, h('h2', {}, 'Announcements'), h('p', { class: 'hint' }, 'A notice board shared with your team — optionally also sent to members by SMS, to the whole church or just one or more ministries.'), canPost && h('div', { class: 'card' }, f),
+  return h('div', {}, h('h2', {}, 'Announcements'), h('p', { class: 'hint' }, isLocalEdition ? 'A notice board shared with your team and your ministry leaders. Notices also show up on the Home screen.' : 'A notice board shared with your team — optionally also sent to members by SMS, to the whole church or just one or more ministries.'), canPost && h('div', { class: 'card' }, f),
     h('div', { class: 'card' }, sel.bar, log.length ? log.map((m) => h('div', { class: 'feed' },
       canDeleteMsg(m) && sel.box(m.id), ' ',
       h('span', { class: 'hint' }, `${fmtDate(m.date)} · ${m.author} → ${mName[m.ministryId] ?? 'Whole church'}`), h('div', {}, m.text),

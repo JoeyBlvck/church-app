@@ -2,6 +2,7 @@ import { h, byName, sum, money, today, fmtDate, monthKey, barChart, ringStat, re
   nextOccurrence, daysUntil, countdownLabel, fitLogoToBackground, dateKey } from '../ui.js';
 import { icon } from '../icons.js';
 import { STATUSES } from './members.js';
+import { isLocalEdition } from '../config.js';
 
 export async function dashboardView({ repo, user, ministries, members, go }) {
   const role = user.role;
@@ -49,8 +50,10 @@ export async function dashboardView({ repo, user, ministries, members, go }) {
   const seenIn = (a, id) => a.presentIds?.includes(id) || a.lateIds?.includes(id);
   const absent = recent.length === 3 ? members.filter((m) => m.status === 'member' && att.some((a) => seenIn(a, m.id)) && !recent.some((a) => seenIn(a, m.id))) : [];
 
-  const list = (title, items, render, none) => h('div', { class: 'card' }, h('b', {}, title), items.length ? h('ul', { class: 'plain' }, items.slice(0, 6).map((x) => h('li', {}, render(x)))) : h('p', { class: 'hint' }, none),
-    items.length > 6 && h('p', { class: 'hint' }, `+ ${items.length - 6} more`));
+  // `all`: show every item (scrolling if there are many) instead of the first six and "+ N more".
+  const list = (title, items, render, none, { all = false } = {}) => h('div', { class: 'card' }, h('b', {}, title),
+    items.length ? h('ul', { class: 'plain', style: all && items.length > 8 ? 'max-height:300px;overflow-y:auto;' : '' }, (all ? items : items.slice(0, 6)).map((x) => h('li', {}, render(x)))) : h('p', { class: 'hint' }, none),
+    !all && items.length > 6 && h('p', { class: 'hint' }, `+ ${items.length - 6} more`));
 
   // ---- recent activity feed: merge announcements, newly added members and attendance
   // takes already loaded above — no extra collections or requests, just re-sort what's here.
@@ -120,7 +123,7 @@ export async function dashboardView({ repo, user, ministries, members, go }) {
         h('ul', { class: 'feed-list' }, activity.map((a) => h('li', {}, h('span', { class: 'fi-ico' }, icon(a.ic, { size: 15 })),
           h('div', { class: 'fi-body' }, a.text, h('time', {}, relTime(a.date))))))) ),
     wantsPeople && h('div', { class: 'grid wide' },
-      list('Birthdays this month', birthdays, (m) => [h('b', {}, m.name), ` · ${fmtDate(m.birthday).replace(/,? \d{4}$/, '')}`], 'No birthdays recorded this month.'),
+      list('Birthdays this month', birthdays, (m) => [h('b', {}, m.name), ` · ${fmtDate(m.birthday).replace(/,? \d{4}$/, '')}`], 'No birthdays recorded this month.', { all: isLocalEdition }),
       list('Visitors to follow up', visitors, (m) => [h('b', {}, m.name), m.phone ? ` · ${m.phone}` : ''], 'No visitors on the list.'),
       list('Not seen in the last 3 services', absent, (m) => [h('b', {}, m.name), m.phone ? ` · ${m.phone}` : ''], recent.length < 3 ? 'Shows once 3 services are recorded.' : 'Everyone is attending. 🙌'),
       role !== 'treasurer' && list('Latest ministry updates', updates.sort((a, b) => b.date.localeCompare(a.date)), (u) => [h('b', {}, ministries.find((m) => m.id === u.ministryId)?.name ?? ''), `: ${u.text.slice(0, 80)}`], 'No updates posted yet.')),
