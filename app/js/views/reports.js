@@ -2,6 +2,7 @@ import { h, field, val, opts, byName, sum, money, today, fmtDate, download, toCs
 import { icon } from '../icons.js';
 import { STATUSES } from './members.js';
 import { dayNameFor } from '../importers.js';
+import { printablesCard } from './printables.js';
 
 export async function reportsView({ repo, user, ministries, members, households }) {
   const canFinance = ['owner', 'admin', 'treasurer'].includes(user.role);
@@ -66,6 +67,7 @@ export async function reportsView({ repo, user, ministries, members, households 
       h('p', { class: 'hint' }, 'Whole-church attendance for each Sunday in a chosen month — a ministry\'s own meeting attendance isn\'t included, even one that happens to fall on a Sunday.'),
       h('div', { class: 'filters' }, monthInput, h('button', { class: 'btn', onclick: () => sundayReport(monthInput.value || today().slice(0, 7)) }, 'Generate report'))),
     out,
+    user.role !== 'treasurer' && printablesCard({ members, ministries, churchName, cs, user }),
     user.role !== 'treasurer' && h('div', { class: 'grid wide noprint' },
       h('div', { class: 'card' }, h('b', {}, 'Membership'), h('table', {}, h('tbody', {}, byStatus.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))), h('tr', {}, h('td', {}, h('b', {}, 'Total')), h('td', {}, h('b', {}, members.length)))))),
       h('div', { class: 'card' }, h('b', {}, 'Members per ministry'), byMinistry.length ? h('table', {}, h('tbody', {}, byMinistry.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))))) : empty('No ministries.')),

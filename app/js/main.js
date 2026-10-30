@@ -4,6 +4,7 @@ import { API_URL, isTauri, isLocalEdition, APP_VERSION } from './config.js';
 import { checkForUpdate, signOutIfInstalledOutsideUpdater } from './updater.js';
 import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo, progress } from './ui.js';
 import { icon } from './icons.js';
+import { openRestore } from './restore.js';
 
 console.log(`The ChurchFlow build: v${APP_VERSION} (forgot password)`); // sanity check: confirms which build the browser actually loaded
 
@@ -443,9 +444,13 @@ async function desktopStatusBar(user, pending) {
   if (['owner', 'admin'].includes(user.role) && backupInfo) {
     const last = backupInfo.last, failed = last?.results?.some((r) => !r.ok);
     const stale = !last || Date.now() - last.at > 2 * 86_400_000;
-    right = h('button', { class: `link ${failed || stale ? 'warn' : ''}`, title: 'Open backup settings',
+    // The USB copy is the one that survives a broken computer, so say so when it is missing or old.
+    const driveDays = backupInfo.lastOnDrive ? Math.floor((Date.now() - backupInfo.lastOnDrive) / 86_400_000) : null;
+    const driveStale = !!backupInfo.extraDir && (driveDays === null || driveDays >= 7);
+    const usbNote = !backupInfo.extraDir ? ' · not on a USB drive yet' : driveStale ? (driveDays === null ? ' · USB drive has no copy yet' : ` · USB copy is ${driveDays} days old`) : '';
+    right = h('button', { class: `link ${failed || stale || driveStale ? 'warn' : ''}`, title: 'Open backup settings',
       onclick: () => { setTab('settings'); render().then(() => document.getElementById('backup-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); } },
-      failed ? 'Last backup had a problem — click to check' : last ? `Last backup: ${fmtWhen(last.at)}` : 'No backup yet — click to back up');
+      failed ? 'Last backup had a problem — click to check' : (last ? `Last backup: ${fmtWhen(last.at)}` : 'No backup yet — click to back up') + usbNote);
   }
   return h('footer', { class: 'statusbar noprint', role: 'status' },
     h('span', { class: lastError ? 'dot off' : saving ? 'dot busy' : 'dot' }), h('span', {}, left),
@@ -517,7 +522,9 @@ function drawSetup() {
       h('p', { class: 'hint' }, 'You will be the owner of the church records on this computer. You can add other staff and leaders afterwards.'),
       h('p', {}, h('button', { class: 'btn block' }, 'Continue')));
     desktopFrame(dots(1), h('h1', {}, 'Welcome to The ChurchFlow'),
-      h('p', { class: 'subtitle' }, "Let's set up your church. It takes about a minute, and everything stays on this computer."), f);
+      h('p', { class: 'subtitle' }, "Let's set up your church. It takes about a minute, and everything stays on this computer."), f,
+      h('p', { class: 'hint', style: 'text-align:center;margin-top:14px' }, 'Already use The ChurchFlow on another computer? ',
+        h('button', { type: 'button', class: 'link', onclick: () => openRestore({ repo, fresh: true, onDone: () => render() }) }, 'Restore from a backup')));
     f.elements.church.focus();
   };
   const step2 = () => {

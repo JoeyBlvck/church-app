@@ -184,3 +184,76 @@ test('the offline edition holds exactly one church', async () => {
   assert.equal((await t.call('GET', '/health')).body.localEdition, true);
   t.server.close();
 });
+
+// ---- moving to a new computer ----
+test('findBackups: sees backups at the top of a drive and in its ChurchFlow Backups folder, nothing else', () => {
+  const { dir, dataDir, backupDir, dbPath, db } = setupDb();
+  const stick = path.join(dir, 'E');
+  fs.mkdirSync(path.join(stick, 'ChurchFlow Backups'), { recursive: true });
+  fs.writeFileSync(path.join(stick, 'churchflow-backup-2026-09-01-080000.db'), 'x');
+  fs.writeFileSync(path.join(stick, 'ChurchFlow Backups', 'churchflow-backup-2026-09-02-080000.db'), 'x');
+  fs.writeFileSync(path.join(stick, 'holiday.db'), 'x');
+  const bk = createBackupManager({ db, dbPath, dataDir, defaultDir: backupDir, scanRoots: () => [stick] });
+  assert.deepEqual(bk.findBackups().map((f) => f.name), ['churchflow-backup-2026-09-02-080000.db', 'churchflow-backup-2026-09-01-080000.db']);
+});
+
+test('status says when each place last got a copy', () => {
+  const { dir, dataDir, backupDir, dbPath, db } = setupDb();
+  const bk = createBackupManager({ db, dbPath, dataDir, defaultDir: backupDir });
+  assert.equal(bk.status().lastOnDrive, null);
+  bk.setExtraDir(path.join(dir, 'usb'));
+  bk.run();
+  const s = bk.status();
+  assert.ok(s.lastOnComputer > 0 && s.lastOnDrive > 0);
+});
+
+test('a new PC can restore the old church from a USB backup: no sign-in needed, then everyone can sign in again', async () => {
+  // old computer
+  const old = setupDb();
+  const oldApp = createApp(old.db, { secret: 'old-secret', localEdition: true });
+  await new Promise((r) => oldApp.listen(0, r));
+  const oldBase = `http://127.0.0.1:${oldApp.address().port}`;
+  await fetch(`${oldBase}/auth/register-church`, { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ churchName: 'Grace Chapel', name: 'Ama', email: 'ama@x.org', password: 'password1' }) });
+  oldApp.close();
+  const oldBk = createBackupManager({ db: old.db, dbPath: old.dbPath, dataDir: old.dataDir, defaultDir: old.backupDir });
+  oldBk.run();
+  const stick = path.join(old.dir, 'stick'); fs.mkdirSync(stick);
+  const file = path.join(stick, fs.readdirSync(old.backupDir)[0]);
+  fs.copyFileSync(path.join(old.backupDir, fs.readdirSync(old.backupDir)[0]), file);
+  // pretend the backup came from an older version: it has no recovery-code table yet
+  const edit = new DatabaseSync(file); edit.exec('DROP TABLE IF EXISTS recovery_codes'); edit.close();
+
+  // new computer
+  const nu = await boot();
+  nu.bk = createBackupManager({ db: nu.db, dbPath: nu.dbPath, dataDir: nu.dataDir, defaultDir: nu.backupDir, scanRoots: () => [stick] });
+  nu.server.close();
+  let restarts = 0;
+  const app = createApp(nu.db, { secret: 'new-secret', backup: nu.bk, localEdition: true, onRestartRequested: () => { restarts++; } });
+  await new Promise((r) => app.listen(0, r));
+  const base = `http://127.0.0.1:${app.address().port}`;
+  const call = async (method, p, body) => { const r = await fetch(base + p, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json() }; };
+  assert.equal((await call('GET', '/health')).body.setupNeeded, true);
+  const found = await call('GET', '/backup/find');
+  assert.equal(found.status, 200); assert.equal(found.body.files[0].path, file);
+  assert.equal((await call('POST', '/backup/restore', { path: file })).status, 200);
+  await new Promise((r) => setTimeout(r, 900));
+  assert.equal(restarts, 1);
+  assert.ok(!fs.existsSync(nu.backupDir) || fs.readdirSync(nu.backupDir).length === 0, 'an empty new install makes no safety copy');
+  app.close(); nu.db.close();
+  // the launcher swaps the file in and starts the server again (here: reopen it)
+  assert.equal(applyPendingRestore(nu.dbPath), true);
+  const db2 = openDb(nu.dbPath);
+  const app2 = createApp(db2, { secret: 'new-secret', backup: createBackupManager({ db: db2, dbPath: nu.dbPath, dataDir: nu.dataDir, defaultDir: nu.backupDir }), localEdition: true });
+  await new Promise((r) => app2.listen(0, r));
+  const base2 = `http://127.0.0.1:${app2.address().port}`;
+  const login = await fetch(`${base2}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'ama@x.org', password: 'password1' }) });
+  assert.equal(login.status, 200, 'the old password works on the new computer');
+  const h = await (await fetch(`${base2}/health`)).json();
+  assert.equal(h.setupNeeded, false);
+  // once a church exists, the restore screens need a signed-in owner again
+  const anon = await fetch(`${base2}/backup/find`);
+  assert.equal(anon.status, 401);
+  assert.ok(db2.prepare("SELECT 1 FROM sqlite_master WHERE name = 'recovery_codes'").get(), 'missing newer tables are added when an older backup is opened');
+  app2.close();
+});

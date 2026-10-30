@@ -151,6 +151,7 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
     runBackup: () => http('POST', '/backup/run', {}),
     setBackupDrive: (extraDir) => http('POST', '/backup/settings', { extraDir: extraDir || null }),
     restoreBackup: (path) => http('POST', '/backup/restore', { path }),
+    findBackups: () => http('GET', '/backup/find'),
     // Offline edition: the desktop app opens its window while the bundled server is still starting.
     async waitUntilUp(timeoutMs = 45_000) {
       const until = Date.now() + timeoutMs;

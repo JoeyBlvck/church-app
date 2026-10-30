@@ -49,7 +49,7 @@ export function applyPendingRestore(dbPath, now = new Date()) {
   return true;
 }
 
-export function createBackupManager({ db, dbPath, dataDir, defaultDir, now = () => new Date() }) {
+export function createBackupManager({ db, dbPath, dataDir, defaultDir, now = () => new Date(), scanRoots = () => listDrives() }) {
   const settingsFile = path.join(dataDir, 'backup-settings.json');
   // Kept in its own small file, NOT in the database, so restoring an older backup never rolls back
   // which drive the church chose or when the last backup ran.
@@ -123,15 +123,34 @@ export function createBackupManager({ db, dbPath, dataDir, defaultDir, now = () 
 
   function status() {
     const s = readSettings();
+    const files = targets().flatMap((t) => listIn(t.dir).map((f) => ({ ...f, kind: t.kind }))).sort((a, b) => b.name.localeCompare(a.name));
+    const newest = (kind) => files.find((f) => f.kind === kind)?.modified ?? null;
     return {
       enabled: true,
       defaultDir,
       extraDir: s.extraDir ?? null,
       last: s.last ?? null,
-      files: targets().flatMap((t) => listIn(t.dir).map((f) => ({ ...f, kind: t.kind }))).sort((a, b) => b.name.localeCompare(a.name)),
+      files,
+      // When each place last got a copy -- so the app can say "your USB copy is 9 days old" even
+      // while the copies on this computer are fresh.
+      lastOnComputer: newest('computer'),
+      lastOnDrive: newest('drive'),
       drives: listDrives(),
     };
   }
+
+  // Backups lying around that aren't in the two folders above -- typically a USB stick brought
+  // from the old computer. Looks at the top of each drive and in a "ChurchFlow Backups" folder
+  // there, plus the folders already in use, never deeper (it must stay quick on a big disk).
+  function findBackups() {
+    const dirs = new Set(targets().map((t) => t.dir));
+    for (const root of scanRoots()) { dirs.add(root); dirs.add(path.join(root, 'ChurchFlow Backups')); }
+    const seen = new Set();
+    return [...dirs].flatMap((d) => listIn(d)).filter((f) => !seen.has(f.path) && seen.add(f.path))
+      .sort((a, b) => b.name.localeCompare(a.name)).slice(0, 50);
+  }
+
+  const hasChurch = () => !!db.prepare('SELECT 1 FROM tenants LIMIT 1').get();
 
   // The second folder -- normally on a USB / external drive. Proven writable right away, so a
   // typo or a drive that isn't plugged in is found now and not on the day it's needed.
@@ -166,13 +185,14 @@ export function createBackupManager({ db, dbPath, dataDir, defaultDir, now = () 
       throw new BackupError('That file is not a ChurchFlow backup.');
     } finally { try { check?.close(); } catch { /* ignore */ } }
     // The data that is about to be replaced is saved first, in every folder that is reachable.
-    run({ reason: 'before-restore' });
+    // (A brand-new install has nothing to save, and an empty "backup" would only clutter the list.)
+    if (hasChurch()) run({ reason: 'before-restore' });
     const pending = `${dbPath}.restore-pending`;
     fs.copyFileSync(file, pending);
     return { staged: true };
   }
 
-  return { run, runDailyIfDue, start, stop, status, setExtraDir, stageRestore, list: () => status().files };
+  return { run, runDailyIfDue, start, stop, status, findBackups, hasChurch, setExtraDir, stageRestore, list: () => status().files };
 }
 
 export class BackupError extends Error { constructor(message) { super(message); this.status = 400; } }

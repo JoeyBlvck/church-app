@@ -4,6 +4,7 @@ import { toCSV } from '../csv.js';
 import { renderQrToCanvas, qrToSvgString } from '../vendor/qrcode.js';
 import { getTheme, setTheme } from '../theme.js';
 import { APP_VERSION, isLocalEdition } from '../config.js';
+import { openRestore } from '../restore.js';
 
 // The 16 regions of Ghana (2019 boundaries) — a convenience picker, since this app is built
 // for Ghanaian churches; District and Location stay free text since there are far too many
@@ -224,6 +225,13 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     const lastOk = info.files[0];
     const problems = (info.last?.results ?? []).filter((r) => !r.ok);
     const stale = !lastOk || Date.now() - lastOk.modified > 3 * 86_400_000;
+    const DAY = 86_400_000;
+    const driveDays = info.lastOnDrive ? Math.floor((Date.now() - info.lastOnDrive) / DAY) : null;
+    // The USB copy is what survives a broken or stolen computer, so it gets its own warning.
+    const driveNote = !info.extraDir
+      ? 'You have no copy on a USB drive yet. If this computer breaks or is stolen, the records go with it. Plug in a USB drive and turn it on below.'
+      : driveDays === null ? 'The USB drive is set up but has no backup yet. Press “Back up now” with the drive plugged in.'
+      : driveDays >= 7 ? `The last copy on the USB drive is ${driveDays} days old. Plug the drive in and press “Back up now”.` : null;
     const driveInput = h('input', { name: 'extraDir', value: info.extraDir ?? '', placeholder: 'e.g. E:\\ChurchFlow Backups', list: 'backup-drives', autocomplete: 'off', style: 'min-width:260px' });
     const driveList = h('datalist', { id: 'backup-drives' }, info.drives.map((d) => h('option', { value: `${d}ChurchFlow Backups` })));
     const run = async (btn) => {
@@ -251,19 +259,23 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
       (stale || problems.length > 0) && h('p', { class: 'err', role: 'alert' }, problems.length
         ? problems.map((p) => p.error).join(' ')
         : lastOk ? 'The last backup is more than 3 days old. Press “Back up now”.' : 'Press “Back up now” to make the first one.'),
+      driveNote && h('p', { class: 'err', role: 'alert' }, driveNote),
       h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: (e) => run(e.currentTarget) }, icon('download', { size: 15 }), 'Back up now')),
       h('p', { class: 'hint' }, `Copies on this computer are kept in: ${info.defaultDir}`),
       h('form', { onsubmit: async (e) => { e.preventDefault();
         try { await repo.setBackupDrive(driveInput.value.trim()); toast(driveInput.value.trim() ? 'USB drive copy turned on.' : 'USB drive copy turned off.'); rerender(); } catch (ex) { toast(ex.message, 'err'); } } },
         field('Second copy on a USB / external drive (optional)', h('div', { class: 'row' }, driveInput, driveList,
           h('button', { class: 'btn ghost' }, info.extraDir ? 'Save' : 'Turn on')),
-          info.drives.length ? `Drives found: ${info.drives.join('  ')}` : 'Plug in the USB drive, then type its folder, e.g. E:\\ChurchFlow Backups.')),
+          info.drives.length ? `Drives found: ${info.drives.join('  ')}` : 'Plug in the USB drive, then type its folder, e.g. E:\\ChurchFlow Backups.'),
+        info.drives.length > 0 && !info.extraDir && h('p', { class: 'actions' }, ...info.drives.map((d) =>
+          h('button', { type: 'button', class: 'btn sm', onclick: () => { driveInput.value = `${d}ChurchFlow Backups`; driveInput.form.requestSubmit(); } }, `Use drive ${d.replace('\\', '')}`)))),
       info.files.length > 0 && h('div', {}, h('b', {}, 'Saved backups'),
         info.files.slice(0, 10).map((f) => h('div', { class: 'feed' },
           h('span', { class: 'hint' }, `${when(f.modified)} · ${f.kind === 'drive' ? 'USB drive' : 'This computer'} · ${size(f.size)}`),
           ' ', h('button', { class: 'btn ghost sm', onclick: () => restore(f) }, 'Restore')),
         ),
-        info.files.length > 10 && h('p', { class: 'hint' }, `+ ${info.files.length - 10} older`)));
+        info.files.length > 10 && h('p', { class: 'hint' }, `+ ${info.files.length - 10} older`)),
+      h('p', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => openRestore({ repo, onDone: () => { repo.resync().finally(rerender); } }) }, 'Restore from a backup on another drive…')));
   }
 
   const helpCard = h('div', { class: 'card', id: 'help-card' }, h('b', {}, 'Help & Support'),

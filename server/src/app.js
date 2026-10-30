@@ -1090,17 +1090,21 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       backup.setExtraDir(body.extraDir || null);
       return backup.status();
     },
-    // Stages the chosen backup; the launcher swaps it in on the restart this triggers.
+    // Backups on a USB stick or other drive that this computer doesn't know about yet (a new PC).
+    'GET /backup/find': (req) => { backupAuth(req, { allowFresh: true }); return { files: backup.findBackups(), drives: backup.status().drives }; },
+    // Stages the chosen backup; the launcher swaps it in on the restart this triggers. On a brand-new
+    // install (no church yet, so nobody to sign in) it is open -- that is how a church moves to a new PC.
     'POST /backup/restore': (req, body) => {
-      backupAuth(req);
+      backupAuth(req, { allowFresh: true });
       backup.stageRestore(body.path);
       setTimeout(onRestartRequested, 600); // after this response has been sent
       return { ok: true, restarting: true };
     },
   };
 
-  function backupAuth(req) {
+  function backupAuth(req, { allowFresh = false } = {}) {
     if (!backup) throw new HttpError(404, 'not found'); // hosted server: no such feature
+    if (allowFresh && !backup.hasChurch()) return null;
     const u = auth(req);
     if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden');
     return u;

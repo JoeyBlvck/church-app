@@ -862,3 +862,22 @@ html.desktop .shell { padding-bottom:28px; }
 .desktop-welcome .welcome-col { display:flex; flex-direction:column; align-items:center; gap:18px; width:100%; }
 .desktop-welcome .copyright { margin:0; font-size:12px; color:rgba(255,255,255,.62); text-align:center; }
 @media print { .desktop-welcome .copyright { color:#666; } }
+
+/* ---------- Reports -> Printable sheets (views/printables.js) ---------- */
+.sheet-lines { margin:10px 0 14px; font-size:13.5px; }
+.sheet-table { width:100%; border-collapse:collapse; }
+.sheet-table th, .sheet-table td { border:1px solid #9aa4b2; padding:0 8px; height:30px; text-align:left; font-size:13.5px; }
+.sheet-table tr { break-inside:avoid; }
+.sheet-table .sheet-split td { background:var(--pill); height:26px; }
+.id-cards { display:grid; grid-template-columns:repeat(2, 85.6mm); gap:8mm 6mm; justify-content:center; }
+.id-card { width:85.6mm; height:54mm; box-sizing:border-box; border:1px solid #9aa4b2; border-top:5px solid var(--primary); border-radius:6px; padding:3mm 4mm; display:flex; flex-direction:column; gap:3mm; background:#fff; color:#10202b; break-inside:avoid; overflow:hidden; }
+.id-card-top { display:flex; align-items:center; gap:3mm; padding-bottom:2mm; border-bottom:1px solid #d5dbe3; }
+.id-card-top img, .id-card-top svg { width:9mm; height:9mm; object-fit:contain; color:var(--primary); flex-shrink:0; }
+.id-card-church { font-weight:800; font-size:11.5px; color:var(--primary); line-height:1.15; }
+.id-card-loc { font-size:9px; color:#5b6672; }
+.id-card-body { display:flex; align-items:center; gap:4mm; flex:1; min-height:0; }
+.id-card-body .avatar-img, .id-card-body .avatar { flex-shrink:0; }
+.id-card-name { font-weight:800; font-size:14px; line-height:1.2; }
+.id-card-line { font-size:10.5px; margin-top:1px; }
+.id-card-line.mute { color:#5b6672; }
+@media print { .id-cards { gap:6mm 5mm; } }
