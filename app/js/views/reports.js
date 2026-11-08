@@ -60,14 +60,19 @@ export async function reportsView({ repo, user, ministries, members, households 
   const church = att.filter((a) => !a.ministryId);
   const monthsAtt = [...new Set(church.map((a) => monthKey(a.date)))].sort().reverse().slice(0, 12).map((mo) => { const r = church.filter((a) => monthKey(a.date) === mo); return [mo, r.length, Math.round(sum(r, attendanceCount) / r.length)]; });
 
+  const section = (t) => h('h3', { class: 'rep-section noprint' }, t);
   return h('div', {}, h('h2', {}, 'Reports'),
+    canFinance && section('Giving'),
     canFinance && h('div', { class: 'card noprint' }, h('b', {}, 'Giving statements'), h('p', { class: 'hint' }, 'Per-member yearly statement for tax or personal records. Statements list income given by that member only.'),
       h('div', { class: 'filters' }, memSel, ySel, h('button', { class: 'btn', onclick: () => memSel.value && statement(memSel.value, ySel.value) }, 'View statement'), h('button', { class: 'btn ghost', onclick: () => allStatements(ySel.value) }, icon('download', { size: 15 }), 'Export all (CSV)'))),
+    user.role !== 'treasurer' && section('Attendance'),
     user.role !== 'treasurer' && h('div', { class: 'card noprint' }, h('b', {}, 'Monthly Sunday attendance report'),
       h('p', { class: 'hint' }, 'Whole-church attendance for each Sunday in a chosen month — a ministry\'s own meeting attendance isn\'t included, even one that happens to fall on a Sunday.'),
       h('div', { class: 'filters' }, monthInput, h('button', { class: 'btn', onclick: () => sundayReport(monthInput.value || today().slice(0, 7)) }, 'Generate report'))),
     out,
+    user.role !== 'treasurer' && section('Print for the church'),
     user.role !== 'treasurer' && printablesCard({ members, ministries, churchName, cs, user }),
+    user.role !== 'treasurer' && section('At a glance'),
     user.role !== 'treasurer' && h('div', { class: 'grid wide noprint' },
       h('div', { class: 'card' }, h('b', {}, 'Membership'), h('table', {}, h('tbody', {}, byStatus.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))), h('tr', {}, h('td', {}, h('b', {}, 'Total')), h('td', {}, h('b', {}, members.length)))))),
       h('div', { class: 'card' }, h('b', {}, 'Members per ministry'), byMinistry.length ? h('table', {}, h('tbody', {}, byMinistry.map(([k, v]) => h('tr', {}, h('td', {}, k), h('td', {}, v))))) : empty('No ministries.')),

@@ -70,7 +70,7 @@ export function printablesCard({ members, ministries, churchName, cs, user }) {
   const row = (title, text, controls) => h('div', { style: 'margin-top:14px' }, h('b', {}, title), h('p', { class: 'hint' }, text), h('div', { class: 'filters' }, ...controls));
   return h('div', { class: 'card noprint' }, h('b', {}, 'Printable sheets'),
     h('p', { class: 'hint' }, 'Print these for the notice board, the church door or a ministry meeting. Use “Save as PDF” in the print window to keep a copy.'),
-    row('Birthday list', 'Everyone with a birthday in the chosen month, in date order.', [monthSel, h('button', { class: 'btn', onclick: () => birthdayList({ ...ctx, month: Number(monthSel.value) }) }, 'Preview')]),
-    row('Attendance sign-in sheet', 'A blank list of names with a box to tick, to pass around at a service or meeting.', [sheetMin, h('button', { class: 'btn', onclick: () => signInSheet({ ...ctx, ministryId: sheetMin.value || null }) }, 'Preview')]),
-    row('Member ID cards', 'Small cards with the church name, photo, name and ministry.', [cardMin, h('button', { class: 'btn', onclick: () => idCards({ ...ctx, ministryId: cardMin.value || null }) }, 'Preview')]));
+    row('Birthday list', 'Everyone with a birthday in the chosen month, in date order.', [monthSel, h('button', { class: 'btn ghost', onclick: () => birthdayList({ ...ctx, month: Number(monthSel.value) }) }, 'Preview')]),
+    row('Attendance sign-in sheet', 'A blank list of names with a box to tick, to pass around at a service or meeting.', [sheetMin, h('button', { class: 'btn ghost', onclick: () => signInSheet({ ...ctx, ministryId: sheetMin.value || null }) }, 'Preview')]),
+    row('Member ID cards', 'Small cards with the church name, photo, name and ministry.', [cardMin, h('button', { class: 'btn ghost', onclick: () => idCards({ ...ctx, ministryId: cardMin.value || null }) }, 'Preview')]));
 }
