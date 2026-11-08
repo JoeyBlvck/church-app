@@ -222,7 +222,7 @@ export function confirmDialog(message, action = 'Delete') {
 export function menu(label, items, { cls = '' } = {}) {
   const visible = items.filter(Boolean);
   const d = h('details', { class: `menu ${cls}` },
-    h('summary', { class: 'btn' }, label, icon('chevronDown', { size: 14 })),
+    h('summary', { class: cls.split(' ').includes('ghost') ? 'btn ghost' : 'btn' }, label, icon('chevronDown', { size: 14 })),
     h('div', { class: 'menu-dropdown' }, visible.map((it) => {
       const tag = it.href ? 'a' : 'button';
       const attrs = it.href ? { href: it.href, target: it.target, rel: it.rel } : { type: 'button', onclick: () => { d.removeAttribute('open'); it.onclick(); } };
@@ -599,3 +599,13 @@ export const progress = (() => {
     },
   };
 })();
+
+// Scrolls to a card on the Settings page, first opening the Settings tab it lives in (Settings is
+// split into tabs; the other tabs' cards exist but are hidden, and a hidden card can't be scrolled to).
+export function revealInSettings(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const panel = el.closest('[data-sec]');
+  if (panel?.hidden) document.querySelector(`.settings-tabs [data-tab="${panel.dataset.sec}"]`)?.click();
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}

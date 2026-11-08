@@ -12,6 +12,9 @@ import { openRestore } from '../restore.js';
 const GHANA_REGIONS = ['Ahafo', 'Ashanti', 'Bono', 'Bono East', 'Central', 'Eastern', 'Greater Accra', 'North East',
   'Northern', 'Oti', 'Savannah', 'Upper East', 'Upper West', 'Volta', 'Western', 'Western North'];
 
+// Which section of Settings is open; remembered while the app runs, so saving something doesn't jump back.
+let activeSection = 'account';
+
 export async function settingsView({ repo, user, sync, rerender, go }) {
   const canManageChurch = ['owner', 'admin'].includes(user.role);
   // A secretary can't rename the check-in service, but — same as sending a Notice by SMS/WhatsApp —
@@ -310,15 +313,18 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
       field('Your password', h('input', { name: 'password', type: 'password', required: true, autocomplete: 'current-password' }))),
     h('p', { class: 'actions' }, h('button', { type: 'submit', class: 'btn danger' }, 'Delete all church data')));
 
-  return h('div', {}, h('h2', {}, 'Settings'),
-    h('div', { class: 'card' }, h('b', {}, church ?? 'Your church'), h('p', { class: 'hint' }, `${user.name} · ${user.email} · ${user.role}`)),
-    // My profile and Password come right after the church summary, ahead of church-wide/admin
-    // settings — this is where the top bar's account badge jumps to (see main.js), so it's the
-    // signed-in person's own settings, not something they have to scroll past the rest to find.
+  // Settings is long, so it is split into sections with a tab strip, like the pages of a program's
+  // Options window. Every section is built (so links such as the status bar's backup warning can find
+  // their card) and the tabs only show one at a time; revealInSettings() in ui.js opens the right one.
+  const sections = [
+    ['account', 'My account', [
     h('div', { class: 'card', id: 'my-profile' }, h('b', {}, 'My profile'), profile),
     h('div', { class: 'card' }, h('b', {}, 'Password'), pw),
     h('div', { class: 'card' }, h('b', {}, 'Appearance'),
       h('p', { class: 'hint' }, 'Only affects this device/browser — everyone signed in here chooses their own.'), themeTabs),
+    isLocalEdition && user.role === 'owner' && recoveryCard(),
+    ]],
+    ['church', 'Church', [
     churchCard,
     // Texts, online giving, WhatsApp, the phone check-in link and the clock-in device all need internet or a
     // public web address, which the one-PC offline edition does not have -- so it doesn't show them.
@@ -336,8 +342,9 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     canManageChurch && go && h('div', { class: 'card' }, h('b', {}, 'Staff & leaders'),
       h('p', { class: 'hint' }, 'Create logins for other office staff and ministry leaders, change roles, reset passwords, or deactivate an account.'),
       h('p', { class: 'actions' }, h('button', { class: 'btn ghost', onclick: () => go('staff') }, icon('staff', { size: 15 }), 'Manage staff & leaders'))),
+    ]],
+    ['data', isLocalEdition ? 'Backups & data' : 'Data & devices', [
     backupCard && h('div', { id: 'backup-card' }, backupCard),
-    isLocalEdition && user.role === 'owner' && recoveryCard(),
     !isLocalEdition && h('div', { class: 'card' }, h('b', {}, 'Sync & backup'), h('p', { class: 'hint' }, `Last synced: ${last ? new Date(last).toLocaleString() : 'never'} · ${pending} change${pending === 1 ? '' : 's'} waiting`),
       h('p', { class: 'actions' }, h('button', { class: 'btn', onclick: async () => { await sync(); toast('Sync finished'); } }, 'Sync now'),
         h('button', { class: 'btn ghost', onclick: async () => download(`church-backup-${today()}.json`, await repo.backup(), 'application/json') }, icon('download', { size: 15 }), 'Download backup (JSON)'),
@@ -358,6 +365,25 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
         } catch (ex) { toast(ex.message, 'err'); }
         finally { btn.disabled = false; }
       } }, icon('download', { size: 15 }), 'Pull enrolled users from device'))),
+    canManageChurch && h('div', { class: 'card danger-zone' }, h('b', {}, 'Danger zone'), resetForm),
+    ]],
+    ['help', 'Help', [
     helpCard,
-    canManageChurch && h('div', { class: 'card danger-zone' }, h('b', {}, 'Danger zone'), resetForm));
+    ]],
+  ].map(([key, label, cards]) => [key, label, cards.filter(Boolean)]).filter(([, , cards]) => cards.length);
+  if (!sections.some(([k]) => k === activeSection)) activeSection = sections[0][0];
+  const tabBtns = sections.map(([key, label]) => h('button', { type: 'button', 'data-tab': key, class: key === activeSection ? 'on' : '', onclick: () => showSection(key) }, label));
+  const panels = sections.map(([key, , cards]) => h('div', { 'data-sec': key, hidden: key !== activeSection }, ...cards));
+  function showSection(key) {
+    activeSection = key;
+    tabBtns.forEach((b) => b.classList.toggle('on', b.dataset.tab === key));
+    panels.forEach((p) => { p.hidden = p.dataset.sec !== key; });
+  }
+  return h('div', {}, h('h2', {}, 'Settings'),
+    h('div', { class: 'card' }, h('b', {}, church ?? 'Your church'), h('p', { class: 'hint' }, `${user.name} · ${user.email} · ${user.role}`)),
+    // My profile and Password come right after the church summary, ahead of church-wide/admin
+    // settings — this is where the top bar's account badge jumps to (see main.js), so it's the
+    // signed-in person's own settings, not something they have to scroll past the rest to find.
+    sections.length > 1 && h('div', { class: 'tabs settings-tabs' }, ...tabBtns),
+    ...panels);
 }

@@ -896,3 +896,16 @@ html.desktop nav { height:calc(100vh - 28px); } /* the status bar sits over the 
   nav button { min-height:36px; padding-block:7px; }
   .navlinks { gap:0; }
 }
+
+/* Settings tabs sit under the church summary; the panels under them need a little breathing room. */
+.settings-tabs { margin-top:4px; flex-wrap:wrap; }
+[data-sec][hidden] { display:none; }
+
+/* The browser's own grey "Choose File" button looked like a web form; style it like our buttons. */
+input[type="file"] { font:inherit; font-size:13.5px; color:var(--mute); }
+input[type="file"]::file-selector-button { font:inherit; font-weight:650; font-size:13.5px; margin-right:12px; padding:8px 14px; cursor:pointer;
+  background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:8px; transition:background .15s; }
+input[type="file"]::file-selector-button:hover { background:var(--pill); }
+
+.menu-item { white-space:nowrap; }
+.menu-dropdown { min-width:230px; }

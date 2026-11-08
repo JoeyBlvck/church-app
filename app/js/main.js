@@ -2,7 +2,7 @@ import { idbStore } from './store.js';
 import { createRepo } from './sync.js';
 import { API_URL, isTauri, isLocalEdition, APP_VERSION } from './config.js';
 import { checkForUpdate, signOutIfInstalledOutsideUpdater } from './updater.js';
-import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo, progress } from './ui.js';
+import { h, toast, avatar, fitLogoToBackground, fmtDate, today, nextOccurrence, daysUntil, countdownLabel, sum, money, passwordField, modal, isNetworkError, brandLogo, progress, revealInSettings } from './ui.js';
 import { icon } from './icons.js';
 import { openRestore } from './restore.js';
 
@@ -359,7 +359,7 @@ async function renderScreen() {
   topBar.push(notificationBell(notifItems, (t) => ctx.go(t), ctx.rerender));
   // Clicking your own name/avatar jumps straight to "My profile" inside Settings — every role
   // can reach Settings (see TABS above), so this is always safe regardless of who's signed in.
-  const goToProfile = () => { setTab('settings'); render().then(() => document.getElementById('my-profile')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); };
+  const goToProfile = () => { setTab('settings'); render().then(() => revealInSettings('my-profile')); };
   topBar.push(h('div', { class: 'account click', role: 'button', tabindex: 0, title: 'View your profile',
       onclick: goToProfile, onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goToProfile(); } } },
     avatar(user.name, user.photo, 34), h('div', { class: 'who' }, h('b', {}, user.name), h('small', {}, user.role))));
@@ -449,7 +449,7 @@ async function desktopStatusBar(user, pending) {
     const driveStale = !!backupInfo.extraDir && (driveDays === null || driveDays >= 7);
     const usbNote = !backupInfo.extraDir ? ' · not on a USB drive yet' : driveStale ? (driveDays === null ? ' · USB drive has no copy yet' : ` · USB copy is ${driveDays} days old`) : '';
     right = h('button', { class: `link ${failed || stale || driveStale ? 'warn' : ''}`, title: 'Open backup settings',
-      onclick: () => { setTab('settings'); render().then(() => document.getElementById('backup-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); } },
+      onclick: () => { setTab('settings'); render().then(() => revealInSettings('backup-card')); } },
       failed ? 'Last backup had a problem — click to check' : (last ? `Last backup: ${fmtWhen(last.at)}` : 'No backup yet — click to back up') + usbNote);
   }
   return h('footer', { class: 'statusbar noprint', role: 'status' },
@@ -608,12 +608,12 @@ if (isLocalEdition) {
         backupInfoAt = 0; render();
       } else if (id === 'backup_settings') {
         if (!(await repo.user())) return;
-        setTab('settings'); render().then(() => document.getElementById('backup-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        setTab('settings'); render().then(() => revealInSettings('backup-card'));
       } else if (id === 'sign_out') {
         document.querySelector('button.signout')?.click();
       } else if (id === 'help') {
         if (!(await repo.user())) return;
-        setTab('settings'); render().then(() => document.getElementById('help-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        setTab('settings'); render().then(() => revealInSettings('help-card'));
       } else if (id === 'about') {
         modal('About The ChurchFlow', h('div', {},
           h('p', {}, h('b', {}, 'The ChurchFlow'), ' — offline edition'),
@@ -640,7 +640,7 @@ if (isLocalEdition) {
       if (i) { e.preventDefault(); i.focus(); i.select(); }
       return;
     }
-    if (e.key === 'F1') { e.preventDefault(); setTab('settings'); render().then(() => document.getElementById('help-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); return; }
+    if (e.key === 'F1') { e.preventDefault(); setTab('settings'); render().then(() => revealInSettings('help-card')); return; }
     if (mod && /^[1-9]$/.test(e.key)) { document.querySelectorAll('.shell > nav .navlinks button')[Number(e.key) - 1]?.click(); e.preventDefault(); }
   });
 }

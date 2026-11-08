@@ -490,15 +490,16 @@ export async function membersView(ctx) {
   const shell = h('div', { class: 'people-shell noprint' }, listPane, detailPane);
 
   const view = h('div', {}, h('div', { class: 'bar' }, h('h2', {}, 'Members'), h('div', { class: 'actions' },
-    canWrite && h('button', { class: 'btn ghost', onclick: downloadTemplate }, icon('download', { size: 15 }), 'Download template'),
-    h('button', { class: 'btn ghost', onclick: exportCsv }, icon('download', { size: 15 }), 'Export'),
-    // Reuses the browser's own Print/Save-as-PDF (same approach as Reports' giving statements)
-    // rather than a bundled PDF library — this project has no build step, so there's nothing
-    // to npm-install into it. The print stylesheet (style.css's @media print) hides the nav,
-    // toolbar and filters and shows pdfHeader+printTable instead, styled in the church's
-    // teal/gold palette.
-    h('button', { class: 'btn ghost', onclick: () => window.print() }, icon('print', { size: 15 }), 'Export PDF'),
-    canWrite && h('button', { class: 'btn ghost', onclick: () => fileInput.click() }, icon('upload', { size: 15 }), 'Upload member spreadsheet'), fileInput,
+    // The spreadsheet and printing actions share one menu so the toolbar is "Add member" and a single
+    // "Import / Export" button, not five buttons in a row. "Export PDF" reuses the browser's own
+    // Print/Save-as-PDF (same approach as Reports' giving statements): the print stylesheet hides the
+    // nav, toolbar and filters and shows pdfHeader+printTable instead, in the church's teal/gold palette.
+    menu('Import / Export', [
+      { label: 'Export members (spreadsheet)', icon: 'download', onclick: exportCsv },
+      { label: 'Export PDF / print', icon: 'print', onclick: () => window.print() },
+      canWrite && { label: 'Upload member spreadsheet', icon: 'upload', onclick: () => fileInput.click() },
+      canWrite && { label: 'Download blank template', icon: 'download', onclick: downloadTemplate },
+    ], { cls: 'ghost' }), fileInput,
     canWrite && h('button', { class: 'btn', onclick: () => openForm() }, icon('plus', { size: 15 }), 'Add member'))),
     directoryHeader, printTable, shell);
 
