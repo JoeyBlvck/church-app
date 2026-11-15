@@ -42,7 +42,7 @@ const RATE_LIMITED_ROUTES = new Map([
 export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', sendPasswordResetEmailImpl, sendWelcomeEmailImpl,
   // Offline ("one PC") edition only -- see backup.js and local.js. Both are left unset on the hosted
   // server, where /backup/* simply doesn't exist and any number of churches may register.
-  backup = null, localEdition = false, onRestartRequested = () => process.exit(RESTART_EXIT_CODE) } = {}) {
+  backup = null, clockin = null, findDevicesImpl = null, localEdition = false, onRestartRequested = () => process.exit(RESTART_EXIT_CODE) } = {}) {
   // In-memory and per-app-instance on purpose: this runs as a single Node process (see
   // server/src/index.js), so there's no shared store to coordinate with — if this is ever scaled
   // to more than one instance, this needs to move to something shared (e.g. Redis) instead, or a
@@ -1101,6 +1101,35 @@ export function createApp(db, { secret = 'dev-secret-change-me', appUrl = '', se
       return { ok: true, restarting: true };
     },
   };
+
+  // ---- clock-in device (offline edition only; see clockin.js) ----
+  // Same audience as backups: the device login is a credential, and the settings decide what
+  // counts as attendance.
+  function clockinAuth(req) {
+    if (!clockin) throw new HttpError(404, 'not found'); // hosted server: the bridge program does this job
+    const u = auth(req);
+    if (!['owner', 'admin'].includes(u.role)) throw new HttpError(403, 'forbidden');
+    return u;
+  }
+  const clockinRoutes = {
+    'GET /clockin/status': (req) => { clockinAuth(req); return clockin.status(); },
+    'POST /clockin/config': (req, body) => {
+      clockinAuth(req);
+      try { clockin.setConfig(body); } catch (e) { throw new HttpError(400, e.message); }
+      return clockin.status();
+    },
+    'POST /clockin/test': async (req, body) => {
+      clockinAuth(req);
+      try { return await clockin.test(body); } catch (e) { throw new HttpError(400, e.message); }
+    },
+    'POST /clockin/enrolled': async (req) => {
+      clockinAuth(req);
+      try { return { users: await clockin.enrolledUsers() }; } catch (e) { throw new HttpError(400, e.message); }
+    },
+    'POST /clockin/poll': async (req) => { clockinAuth(req); return clockin.pollNow(); },
+    'POST /clockin/find': async (req) => { clockinAuth(req); return { devices: await (findDevicesImpl ?? (() => []))() }; },
+  };
+  Object.assign(routes, clockinRoutes);
 
   function backupAuth(req, { allowFresh = false } = {}) {
     if (!backup) throw new HttpError(404, 'not found'); // hosted server: no such feature

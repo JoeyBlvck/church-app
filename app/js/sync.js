@@ -152,6 +152,13 @@ export function createRepo(store, { baseUrl, fetchImpl = globalThis.fetch, now =
     setBackupDrive: (extraDir) => http('POST', '/backup/settings', { extraDir: extraDir || null }),
     restoreBackup: (path) => http('POST', '/backup/restore', { path }),
     findBackups: () => http('GET', '/backup/find'),
+    // Offline edition: the clock-in device on the church's own network (server/src/clockin.js).
+    clockinStatus: () => http('GET', '/clockin/status'),
+    clockinConfig: (cfg) => http('POST', '/clockin/config', cfg),
+    clockinTest: (cfg) => http('POST', '/clockin/test', cfg),
+    clockinPoll: () => http('POST', '/clockin/poll', {}),
+    clockinFind: () => http('POST', '/clockin/find', {}),
+    clockinEnrolled: () => http('POST', '/clockin/enrolled', {}),
     // Offline edition: the desktop app opens its window while the bundled server is still starting.
     async waitUntilUp(timeoutMs = 45_000) {
       const until = Date.now() + timeoutMs;

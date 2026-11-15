@@ -2,6 +2,7 @@
 //   local-server/node.exe            the Node runtime (so the church PC needs nothing installed)
 //   local-server/server/src/*.js     the sync server (server/src, without tests)
 //   local-server/server/package.json
+//   local-server/app/js/importers.js  (shared attendance/lateness rules the clock-in poller uses)
 //
 //   node scripts/prepare-offline.mjs --download-windows-node     (CI: fetches the newest Node 22 for Windows)
 //   node scripts/prepare-offline.mjs --node /path/to/node        (use a Node you already have, for trying it out)
@@ -25,6 +26,10 @@ rmSync(out, { recursive: true, force: true });
 mkdirSync(join(out, 'server'), { recursive: true });
 cpSync(join(root, 'server', 'src'), join(out, 'server', 'src'), { recursive: true });
 copyFileSync(join(root, 'server', 'package.json'), join(out, 'server', 'package.json'));
+// The clock-in poller (server/src/clockin.js) shares its lateness/attendance rules with the app, so
+// that one dependency-free file travels with the server (local-server/app/js/importers.js).
+mkdirSync(join(out, 'app', 'js'), { recursive: true });
+copyFileSync(join(root, 'app', 'js', 'importers.js'), join(out, 'app', 'js', 'importers.js'));
 
 if (flag('--download-windows-node')) {
   const index = await (await fetch('https://nodejs.org/dist/index.json')).json();
@@ -51,6 +56,6 @@ if (flag('--download-windows-node')) {
 const files = [];
 (function walk(d) { for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); e.isDirectory() ? walk(p) : files.push(p); } })(out);
 console.log(`Staged ${files.length} files in src-tauri/local-server/`);
-for (const need of ['server/src/local.js', 'server/src/index.js', 'server/src/backup.js']) {
+for (const need of ['server/src/local.js', 'server/src/index.js', 'server/src/backup.js', 'server/src/clockin.js', 'app/js/importers.js']) {
   if (!existsSync(join(out, need))) throw new Error(`missing ${need}`);
 }

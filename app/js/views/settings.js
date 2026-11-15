@@ -104,6 +104,87 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     h('div', { class: 'row' }, field('Grace period (minutes)', h('input', { name: 'grace', type: 'number', min: 0, max: 180, value: cs.lateGraceMinutes ?? 30, style: 'max-width:140px' }), 'Scanning up to this long after the start time still counts as on time.')),
     h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Save service times')));
 
+  // ---- Clock-in device, offline edition: the PC asks the device for new scans itself, over the church's
+  // own network (no internet needed), and files them as attendance. The password is kept on this PC and
+  // never shown again; leaving the field blank keeps the saved one.
+  const clockinCard = isLocalEdition && canManageChurch && clockinCardFor();
+  function clockinCardFor() {
+    const statusLine = h('p', { class: 'hint' }, 'Checking…');
+    const result = h('p', { class: 'hint' });
+    const finder = h('div', {});
+    const form = h('form', { onsubmit: async (e) => { e.preventDefault();
+      try { await repo.clockinConfig(read(true)); toast('Clock-in device saved'); form.elements.password.value = ''; await refresh(); } catch (ex) { toast(ex.message, 'err'); }
+    } },
+      h('div', { class: 'row' },
+        field('Device address', h('input', { name: 'host', placeholder: '192.168.1.50', autocomplete: 'off' }), 'Shown on the device\'s screen, or use "Find my device" below.'),
+        field('Device username', h('input', { name: 'username', autocomplete: 'off' })),
+        field('Device password', h('input', { name: 'password', type: 'password', autocomplete: 'new-password' }), 'The login for the device\'s own web page. Leave blank to keep the saved one.')),
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'enabled' }), ' Collect attendance from this device automatically'),
+      h('p', { class: 'actions' },
+        h('button', { class: 'btn' }, 'Save'),
+        h('button', { type: 'button', class: 'btn ghost', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; result.textContent = 'Trying the device…';
+          try { const r = await repo.clockinTest(read(false)); result.textContent = r.ok ? `Connected. ${r.scansLastHour} scan${r.scansLastHour === 1 ? '' : 's'} in the last hour.` : r.error; result.className = `hint ${r.ok ? '' : 'err'}`; }
+          catch (ex) { result.textContent = ex.message; result.className = 'hint err'; }
+          finally { b.disabled = false; }
+        } }, 'Test connection'),
+        h('button', { type: 'button', class: 'btn ghost', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; finder.replaceChildren(h('p', { class: 'hint' }, 'Looking on this network… this takes about 10 seconds.'));
+          try {
+            const { devices } = await repo.clockinFind();
+            finder.replaceChildren(devices.length
+              ? h('div', {}, h('p', { class: 'hint' }, 'Found on this network — pick the clock-in device:'), ...devices.map((d) => h('button', { type: 'button', class: 'btn ghost sm', style: 'margin:2px', onclick: () => { form.elements.host.value = d.ip; toast(`Address ${d.ip} filled in — now enter the password and Save.`); } }, `${d.ip}${d.realm ? ` (${d.realm})` : ''}`)))
+              : h('p', { class: 'hint' }, 'Nothing that looks like a clock-in device answered. Check that it is switched on and on the same Wi-Fi/cable network as this computer.'));
+          } catch (ex) { finder.replaceChildren(h('p', { class: 'hint err' }, ex.message)); }
+          finally { b.disabled = false; }
+        } }, 'Find my device'),
+        h('button', { type: 'button', class: 'btn ghost', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true;
+          try {
+            const { users } = await repo.clockinEnrolled();
+            const rows = [['Name', 'Device ID', 'Phone', 'Email', 'Gender', 'Status', 'Birthday', 'Household'], ...users.map((u) => [u.name ?? '', u.deviceUserId ?? '', '', '', '', '', '', ''])];
+            download(`clock-in-device-users-${today()}.csv`, toCSV(rows), 'text/csv');
+            toast(`Downloaded ${users.length} enrolled ${users.length === 1 ? 'person' : 'people'} — fill in the rest, then upload it under Members.`);
+          } catch (ex) { toast(ex.message, 'err'); }
+          finally { b.disabled = false; }
+        } }, icon('download', { size: 15 }), 'List people enrolled on the device'),
+        h('button', { type: 'button', class: 'btn ghost', onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true;
+          try { await repo.clockinPoll(); await sync(); toast('Checked the device'); await refresh(); } catch (ex) { toast(ex.message, 'err'); }
+          finally { b.disabled = false; }
+        } }, 'Check for new scans now')),
+      result, finder);
+    function read(withEnabled) {
+      const el = form.elements;
+      return { host: el.host.value, username: el.username.value, password: el.password.value, ...(withEnabled && { enabled: el.enabled.checked }) };
+    }
+    async function refresh() {
+      try {
+        const st = await repo.clockinStatus();
+        const el = form.elements;
+        if (document.activeElement !== el.host) el.host.value = st.host ?? '';
+        if (document.activeElement !== el.username) el.username.value = st.username ?? '';
+        el.enabled.checked = !!st.enabled;
+        const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m === 1 ? '1 minute ago' : m < 90 ? `${m} minutes ago` : new Date(t).toLocaleString(); };
+        statusLine.className = `hint ${st.enabled && st.lastError ? 'err' : ''}`;
+        statusLine.textContent = !st.configured ? 'Not set up yet.'
+          : !st.enabled ? 'Saved, but switched off.'
+          : st.lastError ? `Not working: ${st.lastError}`
+          : st.lastOk ? `Working. Last checked ${ago(st.lastOk)}${st.lastRecordedAt ? `; last attendance recorded ${ago(st.lastRecordedAt)}` : ''}.`
+          : 'Switched on; waiting for the first check…';
+        const extra = [];
+        if (st.enabled && st.unmatched?.length) extra.push(`These device numbers are not linked to a member yet: ${st.unmatched.join(', ')}. Add each under Members → open a member → Edit → "Clock-in device ID".`);
+        if (st.enabled && st.skippedDays?.length) extra.push(`No service or ministry meeting is set for ${st.skippedDays.join(', ')}, so those scans were not recorded. Set "Meets on" on the ministry.`);
+        extraLine.textContent = extra.join(' ');
+      } catch (ex) { statusLine.textContent = ex.message; }
+    }
+    const extraLine = h('p', { class: 'hint' });
+    refresh();
+    return h('div', { class: 'card', id: 'clockin-card' }, h('b', {}, 'Clock-in device'),
+      h('p', { class: 'hint' }, 'The church computer and the clock-in device only need to be on the same network (Wi-Fi or cable). This computer then collects attendance from the device by itself every 30 seconds, and marks people late using the service times above. No internet and no USB stick needed. Each member needs their "Clock-in device ID" set to match their number on the device.'),
+      statusLine, extraLine, form);
+  }
+
   // ---- SMS (Arkesel): owner/admin only. The API key is never sent back to the client once
   // saved (server/src/app.js's GET /sms/config only ever returns whether it's configured and
   // the sender ID), so changing the sender ID later means re-entering the API key too.
@@ -346,6 +427,7 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     ['church', 'Church', [
     churchCard,
     canManageChurch && h('div', { class: 'card' }, h('b', {}, 'Service times & lateness'), serviceTimesForm),
+    clockinCard,
     // Texts, online giving, WhatsApp, the phone check-in link and the clock-in device all need internet or a
     // public web address, which the one-PC offline edition does not have -- so it doesn't show them.
     !isLocalEdition && canManageChurch && h('div', { class: 'card' }, h('b', {}, 'SMS (Arkesel)'), smsForm),

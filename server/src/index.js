@@ -22,13 +22,19 @@ const port = Number(process.env.PORT ?? 8787);
 // computer itself (so Windows never asks about the firewall and nothing else on the church WiFi can
 // reach the data), and keeps dated backups -- see backup.js.
 const localEdition = process.env.LOCAL_EDITION === '1';
-let backup = null;
+let backup = null, clockin = null, findDevicesImpl = null;
 if (localEdition) {
   const dataDir = process.env.DATA_DIR;
   const dbPath = process.env.DB_PATH;
   if (!dataDir || !dbPath || !process.env.BACKUP_DIR) throw new Error('LOCAL_EDITION needs DATA_DIR, DB_PATH and BACKUP_DIR');
   backup = createBackupManager({ db, dbPath, dataDir, defaultDir: process.env.BACKUP_DIR });
   backup.start();
+  // The clock-in device (Hikvision) on the church's own network: polled from here, no internet needed.
+  // Loaded only in this edition because it reads app/js/importers.js, which the hosted server doesn't carry.
+  const ci = await import('./clockin.js');
+  clockin = ci.createClockIn({ db, dataDir, log: (m) => console.error(m) });
+  findDevicesImpl = () => ci.findDevices();
+  clockin.start();
 }
-createApp(db, { secret: secret ?? 'dev-secret-change-me', appUrl, backup, localEdition })
+createApp(db, { secret: secret ?? 'dev-secret-change-me', appUrl, backup, clockin, findDevicesImpl, localEdition })
   .listen(port, localEdition ? '127.0.0.1' : undefined, () => console.log(`church server on :${port}${localEdition ? ' (this computer only)' : ''}`));
