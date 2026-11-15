@@ -55,6 +55,7 @@ export async function attendanceView({ repo, user, ministries, members, rerender
       h('div', { class: 'filters' }, h('input', { type: 'search', placeholder: 'Find a member…', oninput: (e) => checklist.filter(e.target.value) }),
         h('button', { type: 'button', class: 'btn ghost sm', onclick: checklist.markAllShown }, 'Mark all shown'),
         h('button', { type: 'button', class: 'btn ghost sm', onclick: checklist.clear }, 'Clear'), counter),
+      roster.length > 0 && h('p', { class: 'hint' }, 'P = present · L = late · E = excused. Press a letter again to undo it.'),
       roster.length ? checklist.el : empty('Add members first to tick them present — or just enter a headcount.'),
       h('p', { class: 'actions' }, h('button', { class: 'btn' }, rec.id ? 'Save changes' : 'Save attendance')));
     const dlg = modal(rec.id ? 'Edit attendance' : 'Take attendance', f, { wide: true }); recount();
@@ -143,7 +144,9 @@ export async function attendanceView({ repo, user, ministries, members, rerender
     toast(msg, presentIds.length ? 'ok' : 'err');
     rerender();
   } });
-  const uploadCard = h('div', { class: 'card noprint' }, h('b', {}, 'Upload attendance spreadsheet'),
+  // Collapsed by default: it is a once-in-a-while import, and its long explanation used to push the actual
+  // attendance records down the page.
+  const uploadCard = h('details', { class: 'card noprint import-card' }, h('summary', {}, h('b', {}, 'Import attendance from a spreadsheet or clock-in device')),
     h('p', { class: 'hint' }, 'Either a plain "who was present" list for one date — one column of names or clock-in device IDs, with or without a header row — or your clock-in device\'s own exported record log, which is recognized automatically and brings its own dates (one attendance record per day it covers, filed under Sunday\'s main service or whichever ministry meets that day per its own schedule — a day with neither is skipped). The device log also registers anyone it recognizes who isn\'t a member yet; existing members are only ever matched, never duplicated.'),
     h('div', { class: 'row' }, field('Date', importDate, 'Only used for the plain "who was present" list — a device log carries its own dates.'),
       field('Spreadsheet', h('button', { type: 'button', class: 'btn ghost', onclick: () => importFile.click() }, icon('upload', { size: 15 }), 'Upload spreadsheet'))), importFile);

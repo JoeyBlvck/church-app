@@ -909,3 +909,10 @@ input[type="file"]::file-selector-button:hover { background:var(--pill); }
 
 .menu-item { white-space:nowrap; }
 .menu-dropdown { min-width:230px; }
+
+/* Collapsible cards (Attendance -> import): a plain clickable heading with a small arrow. */
+.import-card > summary { list-style:none; cursor:pointer; display:flex; align-items:center; gap:8px; }
+.import-card > summary::-webkit-details-marker { display:none; }
+.import-card > summary::before { content:'\25B8'; color:var(--mute); transition:transform .15s; }
+.import-card[open] > summary::before { transform:rotate(90deg); }
+.import-card[open] > summary { margin-bottom:10px; }

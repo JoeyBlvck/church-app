@@ -121,11 +121,11 @@ export async function announcementsView({ repo, user, ministries, rerender }) {
     isLocalEdition ? null : whatsappConfig.configured
       ? h('div', {}, h('label', { class: 'check' }, h('input', { type: 'checkbox', name: 'wa', onchange: (e) => { waTargets.hidden = !e.target.checked; } }), ' Also send as a WhatsApp broadcast'), waTargets)
       : h('p', { class: 'hint' }, 'Set up WhatsApp under Settings → WhatsApp to also broadcast this on WhatsApp.'),
-    h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Post announcement')));
-  return h('div', {}, h('h2', {}, 'Announcements'), h('p', { class: 'hint' }, isLocalEdition ? 'A notice board shared with your team and your ministry leaders. Notices also show up on the Home screen.' : 'A notice board shared with your team — optionally also sent to members by SMS, to the whole church or just one or more ministries.'), canPost && h('div', { class: 'card' }, f),
+    h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Post notice')));
+  return h('div', {}, h('h2', {}, 'Notices'), h('p', { class: 'hint' }, isLocalEdition ? 'A notice board shared with your team and your ministry leaders. Notices also show up on the Home screen.' : 'A notice board shared with your team — optionally also sent to members by SMS, to the whole church or just one or more ministries.'), canPost && h('div', { class: 'card' }, f),
     h('div', { class: 'card' }, sel.bar, log.length ? log.map((m) => h('div', { class: 'feed' },
       canDeleteMsg(m) && sel.box(m.id), ' ',
       h('span', { class: 'hint' }, `${fmtDate(m.date)} · ${m.author} → ${mName[m.ministryId] ?? 'Whole church'}`), h('div', {}, m.text),
       h('button', { class: 'btn ghost sm', onclick: async () => { await navigator.clipboard?.writeText(m.text); toast('Copied'); } }, icon('chat', { size: 13 }), 'Copy'),
-      canDeleteMsg(m) && h('button', { class: 'btn del sm', onclick: async () => { await repo.remove('messages', m.id); rerender(); } }, icon('trash', { size: 13 })))) : empty('No announcements yet.')));
+      canDeleteMsg(m) && h('button', { class: 'btn del sm', onclick: async () => { await repo.remove('messages', m.id); rerender(); } }, icon('trash', { size: 13 })))) : empty('No notices yet.')));
 }
