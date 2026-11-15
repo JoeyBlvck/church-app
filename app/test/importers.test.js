@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { rowsToMemberRecords, matchMemberRow, planMemberImport, extractAttendanceEntries, matchIdentifier, planAttendanceImport,
-  looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, dayNameFor, attendanceTargetForDay,
+  looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, dayNameFor, attendanceTargetForDay, parseClockMinutes, serviceStartFor, mergeArrivals,
   parseDateLoose, splitMinistryNames, matchMinistry, prettyMinistryName } from '../js/importers.js';
 
 // ---- member spreadsheet import ----
@@ -205,8 +205,8 @@ test('parseHikvisionLog strips the leading quote marks, converts M/D/YYYY dates,
   ];
   const entries = parseHikvisionLog(rows);
   assert.deepEqual(entries, [
-    { date: '2025-01-02', name: 'Philip Abebreseh', jobNo: '27' },
-    { date: '2025-01-02', name: 'Steven Baidoo', jobNo: '17' },
+    { date: '2025-01-02', name: 'Philip Abebreseh', jobNo: '27', minutes: 7 * 60 + 8 + 4 / 60 }, // the earliest swipe is the arrival
+    { date: '2025-01-02', name: 'Steven Baidoo', jobNo: '17', minutes: 7 * 60 + 18 + 29 / 60 },
   ]);
 });
 
@@ -294,4 +294,52 @@ test('emails with capital letters are lowercased and kept; only ones that are no
   assert.equal(ok.email, 'cillaowusu534@gmail.com'); assert.equal(ok.issues, undefined);
   const [bad] = rowsToMemberRecords([FORM_HEADER, formRow({ 'E-MAIL': 'Paulafugu@icloud' })]);
   assert.equal(bad.email, undefined); assert.equal(bad.issues[0].field, 'email');
+});
+
+// ---- lateness (the device only reports when someone scanned; the church's own start time decides) ----
+
+test('parseClockMinutes reads the time shapes a device or export uses, and nothing else', () => {
+  assert.equal(parseClockMinutes('7:08:04'), 7 * 60 + 8 + 4 / 60);
+  assert.equal(parseClockMinutes('08:30'), 510);
+  assert.equal(parseClockMinutes('8:05 AM'), 485);
+  assert.equal(parseClockMinutes('1:15 PM'), 13 * 60 + 15);
+  assert.equal(parseClockMinutes('12:05 AM'), 5);
+  assert.equal(parseClockMinutes('2026-11-15T08:12:03+00:00'), 8 * 60 + 12 + 3 / 60); // wall clock; the zone suffix is ignored
+  assert.equal(parseClockMinutes(''), null);
+  assert.equal(parseClockMinutes('no time here'), null);
+  assert.equal(parseClockMinutes('25:00'), null);
+});
+
+test('serviceStartFor finds the start time for the weekday of a date', () => {
+  const times = { sunday: '08:00', wednesday: '18:30' };
+  assert.equal(serviceStartFor('2026-09-27', times), '08:00');   // a Sunday
+  assert.equal(serviceStartFor('2026-09-30', times), '18:30');   // a Wednesday
+  assert.equal(serviceStartFor('2026-09-29', times), null);      // a Tuesday: none set
+  assert.equal(serviceStartFor('2026-09-27', undefined), null);
+  assert.equal(serviceStartFor('2026-09-27', { sunday: 'soon' }), null);
+});
+
+test('mergeArrivals: on time is present, after start + grace is late, exactly at the limit is still on time', () => {
+  const r = mergeArrivals(undefined, [{ id: 'a', minutes: 7 * 60 + 50 }, { id: 'b', minutes: 8 * 60 + 30 }, { id: 'c', minutes: 8 * 60 + 31 }], { start: '08:00', graceMinutes: 30 });
+  assert.deepEqual(r, { presentIds: ['a', 'b'], lateIds: ['c'], excusedIds: [] });
+});
+
+test('mergeArrivals: no start time for the day means everyone is present; an unknown arrival time is never late', () => {
+  assert.deepEqual(mergeArrivals(undefined, [{ id: 'a', minutes: 15 * 60 }], { start: null }), { presentIds: ['a'], lateIds: [], excusedIds: [] });
+  assert.deepEqual(mergeArrivals(undefined, [{ id: 'a', minutes: null }], { start: '08:00', graceMinutes: 0 }), { presentIds: ['a'], lateIds: [], excusedIds: [] });
+});
+
+test('mergeArrivals: someone already recorded keeps their status; device presence replaces a manual excused', () => {
+  const existing = { presentIds: ['early'], lateIds: ['slow'], excusedIds: ['away', 'sick'] };
+  const r = mergeArrivals(existing, [{ id: 'early', minutes: 9 * 60 }, { id: 'slow', minutes: 7 * 60 }, { id: 'away', minutes: 7 * 60 + 45 }], { start: '08:00', graceMinutes: 30 });
+  assert.deepEqual(r.presentIds.sort(), ['away', 'early']);
+  assert.deepEqual(r.lateIds, ['slow']);
+  assert.deepEqual(r.excusedIds, ['sick']);
+});
+
+test('planHikvisionImport carries each person\'s first arrival per day, only when the log had times', () => {
+  const entries = [{ date: '2025-01-02', name: 'A', jobNo: '1', minutes: 500 }, { date: '2025-01-02', name: 'A', jobNo: '1', minutes: 480 }, { date: '2025-01-02', name: 'B', jobNo: '2' }];
+  const plan = planHikvisionImport(entries, []);
+  assert.deepEqual(plan.days[0].first, { 'new:1': 480 });
+  assert.equal('first' in planHikvisionImport([{ date: '2025-01-02', name: 'B', jobNo: '2' }], []).days[0], false);
 });

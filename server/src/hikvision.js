@@ -106,11 +106,15 @@ export function parseAcsEvents(json) {
 export function matchEventsToMembers(events, members) {
   const byDeviceId = new Map(members.filter((m) => m.deviceUserId).map((m) => [String(m.deviceUserId), m]));
   const presentIds = new Set(), unmatched = new Set();
+  const scans = new Map(); // member id -> every scan time the device reported for them
   for (const e of events) {
     const m = byDeviceId.get(String(e.deviceUserId));
-    if (m) presentIds.add(m.id); else unmatched.add(e.deviceUserId);
+    if (m) { presentIds.add(m.id); if (!scans.has(m.id)) scans.set(m.id, []); scans.get(m.id).push(e.time); }
+    else unmatched.add(e.deviceUserId);
   }
-  return { presentIds: [...presentIds], unmatched: [...unmatched] };
+  // `arrivals` carries the raw scan times so the caller can tell who was late (see mergeArrivals in
+  // app/js/importers.js); this module only reports what the device said.
+  return { presentIds: [...presentIds], unmatched: [...unmatched], arrivals: [...scans].map(([id, times]) => ({ id, times })) };
 }
 
 // ---- UserInfo search: pull the device's enrolled-person list (name + person/employee

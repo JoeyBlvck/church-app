@@ -1,7 +1,7 @@
 import { h, field, val, opts, byName, today, fmtDate, modal, confirmDialog, toast, empty, barChart, attendanceCount, attendanceChecklist, bulkBar, sum, download, toCsv, pdfHeader } from '../ui.js';
 import { icon } from '../icons.js';
 import { parseCSV } from '../csv.js';
-import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, attendanceTargetForDay, dayNameFor, DAY_NAMES } from '../importers.js';
+import { extractAttendanceEntries, planAttendanceImport, looksLikeHikvisionLog, parseHikvisionLog, planHikvisionImport, attendanceTargetForDay, dayNameFor, DAY_NAMES, mergeArrivals, serviceStartFor } from '../importers.js';
 
 // Exported so ministries.js's own inline attendance panel (take/edit/delete a ministry's own
 // attendance without leaving the ministry) can offer the same service datalist.
@@ -99,8 +99,8 @@ export async function attendanceView({ repo, user, ministries, members, rerender
       const existing = members.find((m) => m.id === id);
       if (existing) await repo.save('members', { ...existing, deviceUserId });
     }
-    let imported = 0, skipped = 0;
-    for (const { date, keys } of plan.days) {
+    let imported = 0, skipped = 0, lateCount = 0;
+    for (const { date, keys, first } of plan.days) {
       // Sunday goes to the whole-church service; any other day is attributed to whichever
       // ministry meets that day (its own meetDays schedule) — a day with no ministry meeting
       // scheduled at all has nothing to attribute these check-ins to, so it's skipped rather
@@ -108,17 +108,18 @@ export async function attendanceView({ repo, user, ministries, members, rerender
       const target = attendanceTargetForDay(date, ministries);
       if (!target) { skipped++; continue; }
       imported++;
-      const presentIds = keys.map((k) => idFor.get(k) ?? k);
+      const arrivals = keys.map((k) => ({ id: idFor.get(k) ?? k, minutes: first?.[k] ?? null }));
       const existing = recs.find((r) => r.date === date && r.service === target.service && (r.ministryId ?? undefined) === target.ministryId);
-      const merged = new Set([...(existing?.presentIds ?? []), ...presentIds]);
-      // A clock-in device can only ever report "was here" — if someone previously marked Late or
-      // Excused by hand now shows up in the device log, that's an upgrade to Present, not a
-      // second, conflicting status alongside it.
-      const lateIds = (existing?.lateIds ?? []).filter((id) => !merged.has(id));
-      const excusedIds = (existing?.excusedIds ?? []).filter((id) => !merged.has(id));
-      await repo.save('attendance', { ...existing, date, service: target.service, ministryId: target.ministryId, presentIds: [...merged], lateIds, excusedIds, extra: existing?.extra ?? 0 });
+      // The device only says who scanned and when -- lateness is the church's own rule (Settings ->
+      // Service times): a first scan after the day's start time plus the grace period is Late. With no
+      // start time set for that weekday everyone is simply Present, as before. Anyone already recorded
+      // keeps their status; device presence replaces a manual "excused".
+      const lists = mergeArrivals(existing, arrivals, { start: serviceStartFor(date, cs.serviceTimes), graceMinutes: cs.lateGraceMinutes ?? 30 });
+      lateCount += lists.lateIds.length - (existing?.lateIds?.length ?? 0);
+      await repo.save('attendance', { ...existing, date, service: target.service, ministryId: target.ministryId, ...lists, extra: existing?.extra ?? 0 });
     }
     let msg = `${imported} day${imported === 1 ? '' : 's'} of attendance imported from the device log`;
+    if (lateCount > 0) msg += `, ${lateCount} arrival${lateCount === 1 ? '' : 's'} marked late`;
     if (skipped) msg += `, ${skipped} day${skipped === 1 ? '' : 's'} skipped (no service or ministry meeting scheduled)`;
     if (plan.toCreate.length) msg += `, ${plan.toCreate.length} new member${plan.toCreate.length === 1 ? '' : 's'} added`;
     if (plan.toBackfill.length) msg += `, ${plan.toBackfill.length} linked to a clock-in ID`;

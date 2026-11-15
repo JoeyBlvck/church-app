@@ -112,3 +112,47 @@ test('bridge: skips recording check-ins on a day with no service or ministry mee
   await rm(dir, { recursive: true, force: true });
   chServer.close(); device.close();
 });
+
+test('bridge: marks someone late when their first scan is after the service start time plus the grace period', async () => {
+  const chServer = createApp(openDb(), { secret: 't' });
+  await new Promise((r) => chServer.listen(0, r));
+  const apiUrl = `http://127.0.0.1:${chServer.address().port}`;
+  const admin = createRepo(memoryStore(), { baseUrl: apiUrl });
+  await admin.registerChurch({ churchName: 'Grace', name: 'Pastor', email: 'p3@g.org', password: 'password1' });
+  const early = await admin.save('members', { name: 'Early Bird', deviceUserId: '1' });
+  const grace = await admin.save('members', { name: 'Within Grace', deviceUserId: '2' });
+  const late = await admin.save('members', { name: 'Late Comer', deviceUserId: '3' });
+  const twice = await admin.save('members', { name: 'Scans Twice', deviceUserId: '4' });
+  const today = new Date().toISOString().slice(0, 10);
+  const todayName = dayNameFor(today);
+  if (todayName !== 'Sunday') await admin.save('ministries', { name: 'Test Ministry', meetDays: [todayName] });
+  // Start 08:00, 30 minutes' grace (the default).
+  await admin.save('settings', { id: 'church', serviceTimes: { [todayName.toLowerCase()]: '08:00' } });
+  await admin.sync();
+  await admin.createStaff({ name: 'Clock-in', email: 'clockin3@g.org', password: 'password1', role: 'secretary' });
+
+  const at = (t) => `${today}T${t}+00:00`;
+  const device = fakeDevice([
+    { time: at('07:40:00'), employeeNoString: '1' },
+    { time: at('08:25:00'), employeeNoString: '2' },
+    { time: at('09:05:00'), employeeNoString: '3' },
+    { time: at('11:00:00'), employeeNoString: '4' },   // leaves after the service ...
+    { time: at('07:55:00'), employeeNoString: '4' },   // ... but their FIRST scan was on time
+  ]);
+  await new Promise((r) => device.listen(0, r));
+  const config = { device: { host: `http://127.0.0.1:${device.address().port}`, username: 'x', password: 'x' },
+    churchManager: { apiUrl, email: 'clockin3@g.org', password: 'password1' } };
+  const dir = await mkdtemp(join(tmpdir(), 'hikbridge-'));
+  const store = fileStore(join(dir, 'state.json'));
+  const repo = createRepo(store, { baseUrl: apiUrl });
+  await repo.login(config.churchManager.email, config.churchManager.password);
+
+  await pollOnce(config, repo, store);
+  await pollOnce(config, repo, store); // a second poll must not change anyone's status
+  const [rec] = await admin.sync().then(() => admin.list('attendance'));
+  assert.deepEqual(rec.presentIds.sort(), [early, grace, twice].sort());
+  assert.deepEqual(rec.lateIds, [late]);
+
+  await rm(dir, { recursive: true, force: true });
+  chServer.close(); device.close();
+});

@@ -5,6 +5,7 @@ import { renderQrToCanvas, qrToSvgString } from '../vendor/qrcode.js';
 import { getTheme, setTheme } from '../theme.js';
 import { APP_VERSION, isLocalEdition } from '../config.js';
 import { openRestore } from '../restore.js';
+import { DAY_NAMES } from '../importers.js';
 
 // The 16 regions of Ghana (2019 boundaries) — a convenience picker, since this app is built
 // for Ghanaian churches; District and Location stay free text since there are far too many
@@ -84,6 +85,24 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     : (cs.logo || cs.motto || cs.location || cs.district || cs.region) && h('div', { class: 'card' }, h('b', {}, 'Church profile'),
         h('div', { class: 'kv' }, [['Motto', cs.motto], ['Location', cs.location], ['District', cs.district], ['Region', cs.region]]
           .filter(([, v]) => v).map(([k, v]) => h('div', {}, h('span', { class: 'hint' }, k), h('div', {}, v)))));
+
+  // ---- Service times (owner/admin): what "late" means. The clock-in device only records when someone
+  // scanned; the app decides lateness from these start times plus one grace period, for clock-in check-ins
+  // only (taking attendance by hand is still marked P / L / E by the person doing it). A blank day means
+  // no lateness is worked out for that day -- everyone who scanned is simply present.
+  const serviceTimesForm = canManageChurch && h('form', { onsubmit: async (e) => { e.preventDefault();
+    const times = {};
+    for (const d of DAY_NAMES) { const v = serviceTimesForm.elements[`st_${d}`].value; if (v) times[d.toLowerCase()] = v; }
+    const grace = Number(serviceTimesForm.elements.grace.value);
+    try {
+      await repo.save('settings', { ...cs, id: 'church', serviceTimes: times, lateGraceMinutes: Number.isFinite(grace) && grace >= 0 ? Math.round(grace) : 30 });
+      toast('Service times saved'); rerender();
+    } catch (ex) { toast(ex.message, 'err'); }
+  } },
+    h('p', { class: 'hint' }, 'The clock-in device only records when someone scanned — it cannot tell who is late. Set when each day\'s service starts, and anyone whose first scan of the day is later than the start time plus the grace period is marked Late. Leave a day blank to mark everyone who scanned as present.'),
+    h('div', { class: 'row' }, ...DAY_NAMES.map((d) => field(d, h('input', { name: `st_${d}`, type: 'time', value: cs.serviceTimes?.[d.toLowerCase()] ?? '' })))),
+    h('div', { class: 'row' }, field('Grace period (minutes)', h('input', { name: 'grace', type: 'number', min: 0, max: 180, value: cs.lateGraceMinutes ?? 30, style: 'max-width:140px' }), 'Scanning up to this long after the start time still counts as on time.')),
+    h('p', { class: 'actions' }, h('button', { class: 'btn' }, 'Save service times')));
 
   // ---- SMS (Arkesel): owner/admin only. The API key is never sent back to the client once
   // saved (server/src/app.js's GET /sms/config only ever returns whether it's configured and
@@ -326,6 +345,7 @@ export async function settingsView({ repo, user, sync, rerender, go }) {
     ]],
     ['church', 'Church', [
     churchCard,
+    canManageChurch && h('div', { class: 'card' }, h('b', {}, 'Service times & lateness'), serviceTimesForm),
     // Texts, online giving, WhatsApp, the phone check-in link and the clock-in device all need internet or a
     // public web address, which the one-PC offline edition does not have -- so it doesn't show them.
     !isLocalEdition && canManageChurch && h('div', { class: 'card' }, h('b', {}, 'SMS (Arkesel)'), smsForm),

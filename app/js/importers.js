@@ -298,7 +298,7 @@ export function looksLikeHikvisionLog(csvRows) {
 export function parseHikvisionLog(csvRows) {
   if (!csvRows.length) return [];
   const head = csvRows[0].map(normalizeHeader);
-  const iName = head.indexOf('sname'), iJob = head.indexOf('sjobno'), iDate = head.indexOf('date');
+  const iName = head.indexOf('sname'), iJob = head.indexOf('sjobno'), iDate = head.indexOf('date'), iTime = head.indexOf('time');
   if (iName < 0 || iDate < 0) return [];
   const seen = new Map();
   for (const r of csvRows.slice(1)) {
@@ -307,7 +307,11 @@ export function parseHikvisionLog(csvRows) {
     if (!date || isHikNull(name)) continue;
     const jobNo = iJob >= 0 ? stripHikCell(r[iJob]) : '';
     const key = `${date}|${jobNo || name.toLowerCase()}`;
-    if (!seen.has(key)) seen.set(key, { date, name, jobNo: isHikNull(jobNo) ? '' : jobNo });
+    // The earliest swipe of the day is the arrival time (later ones are breaks and going home).
+    const minutes = iTime >= 0 ? parseClockMinutes(r[iTime]) : null;
+    const prev = seen.get(key);
+    if (!prev) seen.set(key, { date, name, jobNo: isHikNull(jobNo) ? '' : jobNo, ...(minutes != null && { minutes }) });
+    else if (minutes != null && (prev.minutes == null || minutes < prev.minutes)) prev.minutes = minutes;
   }
   return [...seen.values()];
 }
@@ -325,9 +329,10 @@ export function parseHikvisionLog(csvRows) {
 //    never created twice by a second import of the same (or an overlapping) file.
 export function planHikvisionImport(entries, members) {
   const byDate = new Map(); // date -> Set(member id | 'new:<key>')
+  const firstByDate = new Map(); // date -> Map(key -> earliest arrival, minutes after midnight)
   const toCreate = new Map(); // key -> { key, name, deviceUserId }
   const toBackfill = new Map(); // member id -> deviceUserId
-  for (const { date, name, jobNo } of entries) {
+  for (const { date, name, jobNo, minutes } of entries) {
     let member = jobNo ? members.find((m) => m.deviceUserId && String(m.deviceUserId) === jobNo) : null;
     if (!member) member = members.find((m) => (m.name ?? '').toLowerCase() === name.toLowerCase());
     let key;
@@ -340,9 +345,16 @@ export function planHikvisionImport(entries, members) {
     }
     if (!byDate.has(date)) byDate.set(date, new Set());
     byDate.get(date).add(key);
+    if (minutes != null) {
+      if (!firstByDate.has(date)) firstByDate.set(date, {});
+      const f = firstByDate.get(date);
+      if (f[key] == null || minutes < f[key]) f[key] = minutes;
+    }
   }
   return {
-    days: [...byDate.entries()].map(([date, keys]) => ({ date, keys: [...keys] })).sort((a, b) => a.date.localeCompare(b.date)),
+    // `first` (key -> arrival minutes) is there only when the log carried times; it is what lets the
+    // caller mark late arrivals -- see mergeArrivals below.
+    days: [...byDate.entries()].map(([date, keys]) => ({ date, keys: [...keys], ...(firstByDate.has(date) && { first: firstByDate.get(date) }) })).sort((a, b) => a.date.localeCompare(b.date)),
     toCreate: [...toCreate.values()],
     toBackfill: [...toBackfill.entries()].map(([id, deviceUserId]) => ({ id, deviceUserId })),
   };
@@ -382,4 +394,47 @@ export function attendanceTargetForDay(dateStr, ministries, { sundayService = 'S
   // one) or dropping the day entirely (loses a real meeting's attendance).
   const [m] = meeting.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
   return { ministryId: m.id, service: `${m.name} meeting` };
+}
+
+
+// ---- lateness ----
+// A clock-in device only records who scanned and when; it has no idea what is "late". Lateness is a
+// rule applied here: each service has a start time (Settings -> Service times, one per weekday) and
+// the church has one grace period. Someone whose FIRST scan of the day is later than start + grace is
+// marked Late, otherwise Present. No start time for a day means no lateness for that day.
+
+// "7:08:04", "07:08", "8:05 AM", or an ISO stamp like "2026-11-15T08:12:03+00:00" -> minutes after
+// midnight (seconds as a fraction), or null if there is no time in it. The time is read as the
+// device's own wall-clock time; any time-zone suffix is ignored on purpose.
+export function parseClockMinutes(value) {
+  const m = String(value ?? '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?/);
+  if (!m) return null;
+  let h = Number(m[1]); const min = Number(m[2]); const sec = Number(m[3] ?? 0);
+  if (m[4]) { const pm = m[4].toLowerCase() === 'pm'; h = (h % 12) + (pm ? 12 : 0); }
+  if (h > 23 || min > 59 || sec > 59) return null;
+  return h * 60 + min + sec / 60;
+}
+
+// The start time ("HH:MM") the church set for the weekday of dateStr, or null.
+export function serviceStartFor(dateStr, serviceTimes) {
+  const v = serviceTimes?.[dayNameFor(dateStr).toLowerCase()];
+  return typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v.trim()) ? v.trim() : null;
+}
+
+// Folds a day's arrivals ([{ id, minutes }], minutes = first scan) into an attendance record's
+// present / late / excused lists. Anyone already marked present or late stays exactly as they were
+// (a later scan, or a second poll, never changes an earlier decision); anyone else is Late when
+// their first scan was after start + grace, Present otherwise. Device presence replaces a manual
+// "excused". Returns just the three lists.
+export function mergeArrivals(existing, arrivals, { start = null, graceMinutes = 30 } = {}) {
+  const present = new Set(existing?.presentIds ?? []);
+  const late = new Set(existing?.lateIds ?? []);
+  const startMin = start == null ? null : parseClockMinutes(start);
+  const limit = startMin == null ? null : startMin + (Number.isFinite(graceMinutes) ? graceMinutes : 30);
+  for (const { id, minutes } of arrivals) {
+    if (present.has(id) || late.has(id)) continue;
+    if (limit != null && minutes != null && minutes > limit) late.add(id); else present.add(id);
+  }
+  const excusedIds = (existing?.excusedIds ?? []).filter((id) => !present.has(id) && !late.has(id));
+  return { presentIds: [...present], lateIds: [...late], excusedIds };
 }

@@ -30,7 +30,7 @@ import { dirname, join } from 'node:path';
 import { createRepo } from '../app/js/sync.js';
 import { fileStore } from './src/fileStore.js';
 import { fetchAcsEvents, matchEventsToMembers } from './src/hikvision.js';
-import { attendanceTargetForDay } from '../app/js/importers.js';
+import { attendanceTargetForDay, mergeArrivals, parseClockMinutes, serviceStartFor } from '../app/js/importers.js';
 
 // The device rejects startTime/endTime with milliseconds or a "Z" suffix (confirmed
 // against a real DS-K1T344MBFWX-E1) -- it wants a bare "YYYY-MM-DDTHH:mm:ss", read as the
@@ -70,7 +70,7 @@ async function pollOnce(config, repo, store) {
   const events = await fetchAcsEvents({ baseUrl: config.device.host, username: config.device.username, password: config.device.password, startTime: toDeviceTime(since), endTime: toDeviceTime(nowISO) });
   if (events.length) {
     const members = await repo.list('members');
-    const { presentIds, unmatched } = matchEventsToMembers(events, members);
+    const { presentIds, unmatched, arrivals } = matchEventsToMembers(events, members);
     if (unmatched.length) console.warn(`Clock-in IDs not linked to any member (add these in Members → Edit → "Clock-in device ID"): ${unmatched.join(', ')}`);
     if (presentIds.length) {
       const date = nowISO.slice(0, 10);
@@ -82,8 +82,15 @@ async function pollOnce(config, repo, store) {
       } else {
         const { service, ministryId } = target;
         const existing = (await repo.list('attendance')).find((a) => a.date === date && a.service === service && (a.ministryId ?? undefined) === ministryId);
-        const merged = new Set([...(existing?.presentIds ?? []), ...presentIds]);
-        await repo.save('attendance', { ...existing, date, service, ministryId, presentIds: [...merged] });
+        // A device only says who scanned and when. Lateness comes from the church's own service start
+        // time for today and its grace period (Settings -> Service times); no start time set = everyone
+        // present, as before. Each person's earliest scan decides it, and anyone already recorded keeps
+        // the status they were given.
+        const cs = (await repo.list('settings')).find((x) => x.id === 'church') ?? {};
+        const firsts = arrivals.map(({ id, times }) => ({ id, minutes: Math.min(...times.map(parseClockMinutes).filter((n) => n != null), Infinity) }))
+          .map(({ id, minutes }) => ({ id, minutes: Number.isFinite(minutes) ? minutes : null }));
+        const lists = mergeArrivals(existing, firsts, { start: serviceStartFor(date, cs.serviceTimes), graceMinutes: cs.lateGraceMinutes ?? 30 });
+        await repo.save('attendance', { ...existing, date, service, ministryId, ...lists });
         console.log(`${new Date().toLocaleTimeString()}: recorded ${presentIds.length} check-in(s) for "${service}" on ${date}.`);
       }
     }
